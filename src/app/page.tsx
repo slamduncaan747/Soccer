@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ProjectionResult, PlayerProjection, FixtureProjection, TeamProjection } from "@/lib/types";
+import type { ProjectionResult, PlayerProjection, FixtureProjection } from "@/lib/types";
 
 type Tab = "matches" | "table" | "insights";
 
@@ -52,6 +52,17 @@ const flag = (team: string) => FLAGS[team] ?? "🏳️";
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
+// Feature 3: Live match helpers
+function isLiveByTime(kickoff: string | undefined): boolean {
+  if (!kickoff) return false;
+  const ms = Date.now() - new Date(kickoff).getTime();
+  return ms > 0 && ms < 115 * 60 * 1000;
+}
+
+function liveMinute(kickoff: string): number {
+  return Math.floor((Date.now() - new Date(kickoff).getTime()) / 60000);
+}
+
 export default function Page() {
   const [data, setData]       = useState<ProjectionResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -90,6 +101,19 @@ export default function Page() {
             </span>
           )}
         </div>
+        {/* Feature 1: Status pills */}
+        {data && (
+          <div className="app-status-strip">
+            <div className={`status-pill${data.status.groupSource === "kalshi" ? " live" : ""}`}>
+              <span className="pill-dot" />
+              {data.status.groupSource === "kalshi" ? "KALSHI" : "MOCK ODDS"}
+            </div>
+            <div className={`status-pill${data.status.liveResults ? " live" : ""}`}>
+              <span className="pill-dot" />
+              {data.status.liveResults ? "LIVE DATA" : "NO LIVE"}
+            </div>
+          </div>
+        )}
       </header>
 
       <main className="page">
@@ -106,7 +130,7 @@ export default function Page() {
         ) : (
           <div className="tab-pane" key={tab}>
             {tab === "matches"  && <MatchesTab fixtures={data.fixtures} />}
-            {tab === "table"    && <TableTab players={data.players} />}
+            {tab === "table"    && <TableTab players={data.players} fixtures={data.fixtures} />}
             {tab === "insights" && <InsightsTab players={data.players} fixtures={data.fixtures} />}
           </div>
         )}
@@ -134,6 +158,8 @@ function MatchesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
   const groups = useMemo(() => groupByDay(fixtures), [fixtures]);
   const todayKey = groups.find((g) => g.isToday)?.key ?? groups[0]?.key ?? null;
   const [selectedKey, setSelectedKey] = useState<string | null>(todayKey);
+  // Feature 2: expanded card state
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const stripRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -163,14 +189,29 @@ function MatchesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
       <div className="day-matches">
         {activeGroup.matches.length === 0
           ? <div className="empty-state">No matches this day.</div>
-          : activeGroup.matches.map((f) => <MatchCard key={f.id} fixture={f} />)
+          : activeGroup.matches.map((f) => (
+              <MatchCard
+                key={f.id}
+                fixture={f}
+                isExpanded={expandedId === f.id}
+                onToggle={() => setExpandedId(expandedId === f.id ? null : f.id)}
+              />
+            ))
         }
       </div>
     </div>
   );
 }
 
-function MatchCard({ fixture: f }: { fixture: FixtureProjection }) {
+function MatchCard({
+  fixture: f,
+  isExpanded,
+  onToggle,
+}: {
+  fixture: FixtureProjection;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
   const d = f.kickoff ? new Date(f.kickoff) : null;
   const timeStr = d ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }) : "TBD";
   const [tVal, tPeriod] = timeStr.split(" ");
@@ -179,8 +220,15 @@ function MatchCard({ fixture: f }: { fixture: FixtureProjection }) {
   const dp = odds ? Math.round(odds.draw * 100) : null;
   const ap = odds ? Math.round(odds.loss * 100) : null;
 
+  // Feature 3: live detection
+  const live = f.liveStatus != null ? f.liveStatus !== "FINISHED"
+    : isLiveByTime(f.kickoff);
+  const minute = live && f.kickoff
+    ? (f.liveMinute ?? liveMinute(f.kickoff))
+    : null;
+
   return (
-    <div className="match-card">
+    <div className="match-card" onClick={onToggle}>
       <div className="match-card-teams">
         <div className="mc-team home">
           <span className="mc-flag">{flag(f.home)}</span>
@@ -188,8 +236,22 @@ function MatchCard({ fixture: f }: { fixture: FixtureProjection }) {
           <span className="mc-owner">{f.homeOwner}</span>
         </div>
         <div className="mc-center">
-          <span className="mc-time">{tVal}</span>
-          {tPeriod && <span className="mc-period">{tPeriod}</span>}
+          {live ? (
+            <>
+              <span className="live-badge">LIVE</span>
+              {f.liveScore ? (
+                <span className="live-score">{f.liveScore.home}–{f.liveScore.away}</span>
+              ) : minute !== null ? (
+                <span className="live-minute">{minute}&apos;</span>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <span className="mc-time">{tVal}</span>
+              {tPeriod && <span className="mc-period">{tPeriod}</span>}
+              <span className="mc-chevron">{isExpanded ? "▲" : "▼"}</span>
+            </>
+          )}
         </div>
         <div className="mc-team away">
           <span className="mc-flag">{flag(f.away)}</span>
@@ -211,6 +273,54 @@ function MatchCard({ fixture: f }: { fixture: FixtureProjection }) {
           </div>
         </div>
       )}
+      {/* Feature 2: expanded preview */}
+      {isExpanded && (
+        <div className="match-preview">
+          {f.swingPlayer && f.swingToward && (
+            <div className="preview-insight">
+              <span className="preview-insight-icon">⚡</span>
+              <span>
+                A <strong>{f.swingToward === "home" ? f.home : f.away}</strong> win gives{" "}
+                <strong style={{ color: playerColor(f.swingPlayer) }}>{displayName(f.swingPlayer)}</strong>{" "}
+                the biggest title boost (+{Math.round(f.swing * 100)}% win prob)
+              </span>
+            </div>
+          )}
+          <div className="preview-stakes">
+            <div className="stake-item">
+              <span className="stake-flag">{flag(f.home)}</span>
+              <div>
+                <div className="stake-team">{f.home}</div>
+                <div className="stake-owner" style={{ color: playerColor(f.homeOwner) }}>{f.homeOwner}&apos;s team</div>
+              </div>
+            </div>
+            <div className="stake-vs">VS</div>
+            <div className="stake-item right">
+              <div>
+                <div className="stake-team">{f.away}</div>
+                <div className="stake-owner right" style={{ color: playerColor(f.awayOwner) }}>{f.awayOwner}&apos;s team</div>
+              </div>
+              <span className="stake-flag">{flag(f.away)}</span>
+            </div>
+          </div>
+          {f.oddsHome && (
+            <div className="preview-outcomes">
+              <div className="outcome-row">
+                <span className="outcome-label">{f.home} win</span>
+                <span className="outcome-prob" style={{ color: teamColor(f.home) }}>{Math.round(f.oddsHome.win * 100)}%</span>
+              </div>
+              <div className="outcome-row">
+                <span className="outcome-label">Draw</span>
+                <span className="outcome-prob" style={{ color: "var(--t2)" }}>{Math.round(f.oddsHome.draw * 100)}%</span>
+              </div>
+              <div className="outcome-row">
+                <span className="outcome-label">{f.away} win</span>
+                <span className="outcome-prob" style={{ color: teamColor(f.away) }}>{Math.round(f.oddsHome.loss * 100)}%</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -218,7 +328,7 @@ function MatchCard({ fixture: f }: { fixture: FixtureProjection }) {
 /* ============================================================
    TABLE TAB
    ============================================================ */
-function TableTab({ players }: { players: PlayerProjection[] }) {
+function TableTab({ players, fixtures }: { players: PlayerProjection[]; fixtures: FixtureProjection[] }) {
   const [open, setOpen] = useState<string | null>(null);
 
   const sorted = useMemo(
@@ -229,6 +339,30 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
   );
 
   const maxPts = Math.max(...sorted.map((p) => p.currentPoints), 1);
+
+  // Feature 4: live adjustments
+  const liveFix = useMemo(
+    () => fixtures.filter((f) => f.liveStatus != null || isLiveByTime(f.kickoff)),
+    [fixtures]
+  );
+
+  const liveAdjustments = useMemo(() => {
+    const adj: Record<string, number> = {};
+    for (const f of liveFix) {
+      const { homeOwner, awayOwner, liveScore } = f;
+      if (!liveScore) continue;
+      const { home: sh, away: sa } = liveScore;
+      if (sh > sa) {
+        adj[homeOwner] = (adj[homeOwner] ?? 0) + 3;
+      } else if (sa > sh) {
+        adj[awayOwner] = (adj[awayOwner] ?? 0) + 3;
+      } else {
+        adj[homeOwner] = (adj[homeOwner] ?? 0) + 1;
+        adj[awayOwner] = (adj[awayOwner] ?? 0) + 1;
+      }
+    }
+    return adj;
+  }, [liveFix]);
 
   return (
     <div className="standings-wrap">
@@ -244,16 +378,15 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
         const isLeader = i === 0;
         const ptPct = (p.currentPoints / maxPts) * 100;
 
-        // Teams remaining: still alive = no loss OR haven't finished group stage
         const gamesPlayed = p.teams.reduce((s, t) => s + t.w + t.d + t.l, 0);
         const teamsAlive = p.teams.filter((t) => {
           const played = t.w + t.d + t.l;
-          // Eliminated if: played 2+ games with 0 pts and no draws
           if (played >= 2 && t.currentPoints === 0 && t.d === 0) return false;
-          // Eliminated if: played all 3 group games with 0 pts
           if (played >= 3 && t.currentPoints === 0) return false;
           return true;
         }).length;
+
+        const delta = liveAdjustments[p.player];
 
         return (
           <div key={p.player}>
@@ -278,7 +411,12 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
                 </span>
               </div>
               <div className="row-right">
-                <span className="row-pts">{p.currentPoints}</span>
+                <div className="row-pts-row">
+                  <span className="row-pts">{p.currentPoints}</span>
+                  {delta != null && delta > 0 && (
+                    <span className="live-delta">+{delta}</span>
+                  )}
+                </div>
                 <span className="row-pts-label">pts</span>
               </div>
               <div className="row-progress" style={{ width: `${ptPct}%` }} />
@@ -342,7 +480,7 @@ function InsightsTab({ players, fixtures }: { players: PlayerProjection[]; fixtu
   return (
     <div className="insights-wrap">
 
-      {/* ── Win probability ── */}
+      {/* Win probability */}
       <div className="insight-section">
         <div className="insight-header">
           <span className="insight-title">Win Probability</span>
@@ -374,7 +512,7 @@ function InsightsTab({ players, fixtures }: { players: PlayerProjection[]; fixtu
         ))}
       </div>
 
-      {/* ── Projected final standings ── */}
+      {/* Projected final standings */}
       <div className="insight-section">
         <div className="insight-header">
           <span className="insight-title">Projected Final Points</span>
@@ -407,7 +545,7 @@ function InsightsTab({ players, fixtures }: { players: PlayerProjection[]; fixtu
         </div>
       </div>
 
-      {/* ── Key matches ── */}
+      {/* Key matches */}
       {topSwing.length > 0 && (
         <div className="insight-section">
           <div className="insight-header">
@@ -449,7 +587,7 @@ function InsightsTab({ players, fixtures }: { players: PlayerProjection[]; fixtu
         </div>
       )}
 
-      {/* ── Finish distribution ── */}
+      {/* Finish distribution */}
       <div className="insight-section">
         <div className="insight-header">
           <span className="insight-title">Finish Distribution</span>
@@ -588,3 +726,4 @@ function sameDay(a: Date, b: Date) {
     && a.getMonth() === b.getMonth()
     && a.getDate() === b.getDate();
 }
+

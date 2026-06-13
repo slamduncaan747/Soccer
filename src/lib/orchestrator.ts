@@ -1,5 +1,5 @@
 import { ALL_TEAMS } from "../data/pool";
-import { fetchLiveRecords, mergeRecords } from "./footballData";
+import { fetchLiveRecords, fetchLiveScores, mergeRecords } from "./footballData";
 import { fetchGroupFixtures, fetchKnockoutOdds } from "./kalshi";
 import { mockGroupFixtures, mockKnockoutOdds } from "./mockOdds";
 import { runProjection } from "./engine";
@@ -47,5 +47,24 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
     groupSource,
     knockoutSource,
   };
+
+  // Merge live scores into fixtures for in-progress matches
+  if (!opts.forceMock) {
+    const liveScores = await fetchLiveScores();
+    if (liveScores.length > 0) {
+      const liveMap = new Map(liveScores.map((l) => [`${l.home}|${l.away}`, l]));
+      result.fixtures = result.fixtures.map((f) => {
+        const liveMatch = liveMap.get(`${f.home}|${f.away}`);
+        if (!liveMatch) return f;
+        return {
+          ...f,
+          liveStatus: liveMatch.status,
+          liveScore: { home: liveMatch.scoreHome, away: liveMatch.scoreAway },
+          liveMinute: liveMatch.minute,
+        };
+      });
+    }
+  }
+
   return result;
 }

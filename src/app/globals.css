@@ -99,11 +99,40 @@ body {
 }
 
 /* ──────────────────────────────────────
+   STATUS PILLS
+────────────────────────────────────── */
+.app-status-strip {
+  display: flex;
+  gap: 6px;
+  padding: 0 16px 8px;
+}
+.status-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 99px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  background: #1a1a1a;
+  color: #545454;
+}
+.status-pill.live { color: #4ade80; }
+.status-pill .pill-dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+/* ──────────────────────────────────────
    DAY STRIP
 ────────────────────────────────────── */
 .day-strip-wrap {
   position: sticky;
-  top: calc(50px + env(safe-area-inset-top));
+  top: calc(74px + env(safe-area-inset-top));
   z-index: 10;
   background: rgba(8,8,8,0.96);
   backdrop-filter: blur(16px);
@@ -454,6 +483,101 @@ body {
   font-size: 14px;
   color: var(--t2);
   line-height: 1.6;
+}
+
+/* ──────────────────────────────────────
+   MATCH CARD EXPANSION
+────────────────────────────────────── */
+.match-card { cursor: pointer; }
+.match-preview {
+  border-top: 1px solid var(--line);
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: tabFade 0.15s ease;
+}
+.preview-insight {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--t2);
+  line-height: 1.4;
+}
+.preview-insight-icon { font-size: 14px; flex-shrink: 0; }
+.preview-insight strong { color: var(--t1); }
+.preview-stakes {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.stake-item { display: flex; align-items: center; gap: 8px; }
+.stake-item.right { flex-direction: row-reverse; }
+.stake-flag { font-size: 24px; }
+.stake-team { font-size: 14px; font-weight: 700; color: var(--t1); }
+.stake-owner { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.stake-owner.right { text-align: right; }
+.stake-vs { font-size: 11px; font-weight: 800; color: var(--t3); letter-spacing: 0.1em; }
+.preview-outcomes { display: flex; flex-direction: column; gap: 6px; }
+.outcome-row { display: flex; justify-content: space-between; align-items: center; }
+.outcome-label { font-size: 13px; color: var(--t2); font-weight: 500; }
+.outcome-prob { font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* ──────────────────────────────────────
+   LIVE MATCH
+────────────────────────────────────── */
+.live-badge {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--green);
+  background: rgba(74,222,128,0.12);
+  padding: 2px 5px;
+  border-radius: 4px;
+  animation: livePulse 2s ease-in-out infinite;
+}
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.live-score {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+  color: var(--t1);
+  line-height: 1;
+}
+.live-minute {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--green);
+  font-variant-numeric: tabular-nums;
+}
+.mc-chevron {
+  font-size: 8px;
+  color: var(--t3);
+  margin-top: 2px;
+  line-height: 1;
+}
+
+/* ──────────────────────────────────────
+   LIVE DELTA CHIP
+────────────────────────────────────── */
+.row-pts-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.live-delta {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--green);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  animation: livePulse 2s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

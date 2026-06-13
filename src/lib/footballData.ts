@@ -80,6 +80,48 @@ export async function fetchLiveRecords(): Promise<LiveRecord[] | null> {
   }
 }
 
+export interface LiveMatchScore {
+  home: string;
+  away: string;
+  scoreHome: number;
+  scoreAway: number;
+  status: "IN_PLAY" | "PAUSED" | "HALFTIME";
+  minute?: number;
+}
+
+export async function fetchLiveScores(): Promise<LiveMatchScore[]> {
+  const token = process.env.FOOTBALL_DATA_TOKEN;
+  if (!token) return [];
+  try {
+    const res = await fetch(`${FD_BASE}/competitions/WC/matches?status=IN_PLAY,PAUSED,HALFTIME`, {
+      headers: { "X-Auth-Token": token },
+      next: { revalidate: 30 },
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { matches?: Array<{
+      status: string;
+      homeTeam: { name: string };
+      awayTeam: { name: string };
+      score?: { fullTime?: { home: number | null; away: number | null } };
+      minute?: number;
+    }> };
+    const aliases = fdAliases();
+    return (data.matches ?? []).flatMap((m) => {
+      const home = canon(m.homeTeam.name, aliases);
+      const away = canon(m.awayTeam.name, aliases);
+      if (!home || !away) return [];
+      const sc = m.score?.fullTime;
+      return [{
+        home, away,
+        scoreHome: sc?.home ?? 0,
+        scoreAway: sc?.away ?? 0,
+        status: (["IN_PLAY", "PAUSED", "HALFTIME"].includes(m.status) ? m.status : "IN_PLAY") as LiveMatchScore["status"],
+        minute: m.minute,
+      }];
+    });
+  } catch { return []; }
+}
+
 // Merge live records over seed data. Seed is the floor; live overrides per team.
 export function mergeRecords(seed: TeamSeed[], live: LiveRecord[] | null): TeamSeed[] {
   if (!live) return seed;

@@ -71,6 +71,10 @@ export interface FixtureProjection {
   swing: number;
   swingPlayer?: string;          // the player whose title odds move most on this result
   swingToward?: "home" | "away"; // which result helps that player
+  // Live match data (populated from football-data.org during active matches)
+  liveStatus?: "IN_PLAY" | "PAUSED" | "HALFTIME" | "FINISHED";
+  liveScore?: { home: number; away: number };
+  liveMinute?: number;
 }
 
 // Health of the live data pipeline, surfaced in the UI so users can see
