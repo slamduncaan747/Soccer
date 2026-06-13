@@ -9,14 +9,11 @@ type Tab = "matches" | "table";
 const DISPLAY_NAME: Record<string, string> = { Isiah: "Zeke" };
 const displayName = (name: string) => DISPLAY_NAME[name] ?? name;
 
-const AVATAR_SRC: Record<string, string> = {
-  Wyatt:  "/avatars/wyatt.jpeg",
-  Isiah:  "/avatars/isiah.jpeg",
-  Sam:    "/avatars/sam.jpeg",
-  Conrad: "/avatars/conrad.jpeg",
-  Gus:    "/avatars/gus.jpeg",
-  Duncan: "/avatars/duncan_sq.jpeg",
+const PLAYER_COLORS: Record<string, string> = {
+  Sam: "#3b82f6", Wyatt: "#f59e0b", Duncan: "#8b5cf6",
+  Conrad: "#ec4899", Gus: "#10b981", Isiah: "#f97316",
 };
+const playerColor = (name: string) => PLAYER_COLORS[name] ?? "#555";
 
 /* National team primary colors — used for odds bar segments */
 const TEAM_COLORS: Record<string, string> = {
@@ -253,7 +250,7 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
         const isOpen = open === p.player;
         const isLeader = i === 0;
         const pct = (p.currentPoints / maxPts) * 100;
-        const avatarSrc = AVATAR_SRC[p.player];
+        const color = playerColor(p.player);
 
         return (
           <div key={p.player}>
@@ -262,11 +259,8 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
               onClick={() => setOpen(isOpen ? null : p.player)}
             >
               <span className="row-rank">{i + 1}</span>
-              <div className="row-avatar" aria-hidden>
-                {avatarSrc && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={avatarSrc} alt="" width={40} height={40} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%", display: "block" }} />
-                )}
+              <div className="row-avatar" aria-hidden style={{ background: color }}>
+                {displayName(p.player).charAt(0)}
               </div>
               <div className="row-info">
                 <div className="row-name">{displayName(p.player)}</div>
