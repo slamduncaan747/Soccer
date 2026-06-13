@@ -282,7 +282,7 @@ body {
 
 .standings-header {
   display: grid;
-  grid-template-columns: 40px 1fr 56px;
+  grid-template-columns: 32px 44px 1fr 56px;
   padding: 10px 16px;
   font-size: 10px;
   font-weight: 700;
@@ -297,9 +297,10 @@ body {
 .standing-row {
   position: relative;
   display: grid;
-  grid-template-columns: 40px 1fr 56px;
+  grid-template-columns: 32px 44px 1fr 56px;
   align-items: center;
-  padding: 15px 16px;
+  gap: 0 4px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--line);
   cursor: pointer;
   transition: background 0.1s;
@@ -311,13 +312,23 @@ body {
 .standing-row.leader { background: var(--green-dim); }
 
 .row-rank {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--t2);
   text-align: center;
   line-height: 1;
 }
 .leader .row-rank { color: var(--green); }
+
+.row-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: var(--card-2);
+  background-repeat: no-repeat;
+  flex-shrink: 0;
+  overflow: hidden;
+}
 
 .row-info { min-width: 0; }
 .row-name {
