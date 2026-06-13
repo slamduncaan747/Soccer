@@ -22,21 +22,30 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
   let groupFixtures = mockGroupFixtures();
   let knockoutOdds = mockKnockoutOdds();
   let source: ProjectionResult["oddsSource"] = "mock";
+  let groupSource: "kalshi" | "mock" = "mock";
+  let knockoutSource: "kalshi" | "mock" = "mock";
 
   if (!opts.forceMock) {
     const [grp, ko] = await Promise.all([fetchGroupFixtures(), fetchKnockoutOdds()]);
-    if (grp.ok && ko.ok) {
+    if (grp.ok) {
       groupFixtures = grp.fixtures;
-      knockoutOdds = ko.odds;
-      source = "kalshi";
-    } else if (grp.ok || ko.ok) {
-      if (grp.ok) groupFixtures = grp.fixtures;
-      if (ko.ok) knockoutOdds = ko.odds;
-      source = "mixed";
+      groupSource = "kalshi";
     }
+    if (ko.ok) {
+      knockoutOdds = ko.odds;
+      knockoutSource = "kalshi";
+    }
+    if (grp.ok && ko.ok) source = "kalshi";
+    else if (grp.ok || ko.ok) source = "mixed";
   }
 
   const result = runProjection({ records, groupFixtures, knockoutOdds, iterations });
   result.oddsSource = source;
+  result.status = {
+    ...result.status,
+    liveResults: !opts.forceMock && !!live && live.length > 0,
+    groupSource,
+    knockoutSource,
+  };
   return result;
 }

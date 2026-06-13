@@ -28,6 +28,11 @@ export function mockGroupFixtures(): GroupFixture[] {
   const rng = mulberry32(42);
   const teams = ALL_TEAMS.map((t) => t.name);
   const fixtures: GroupFixture[] = [];
+  // Stagger kickoffs starting at noon today so the "Today" view has live-looking
+  // matches and the rest spill across the coming days (mock scaffolding only).
+  const start = new Date();
+  start.setHours(12, 0, 0, 0);
+  let slot = 0;
   // Two remaining group matches per team, paired round-robin-ish.
   for (let round = 0; round < 2; round++) {
     const shuffled = [...teams].sort(() => rng() - 0.5);
@@ -40,10 +45,18 @@ export function mockGroupFixtures(): GroupFixture[] {
       const pHomeRaw = 0.15 + 0.7 * (sh / total);
       const pAwayRaw = 0.15 + 0.7 * (sa / total);
       const pDrawRaw = 0.28;
+      // ~4 matches per day, every 3 hours, then roll to the next day's noon.
+      const day = Math.floor(slot / 4);
+      const hour = (slot % 4) * 3;
+      const kickoff = new Date(start);
+      kickoff.setDate(start.getDate() + day);
+      kickoff.setHours(12 + hour);
+      slot++;
       fixtures.push({
         id: `mock-${round}-${i}`,
         home,
         away,
+        kickoff: kickoff.toISOString(),
         oddsHome: normalize3({ win: pHomeRaw, draw: pDrawRaw, loss: pAwayRaw }),
       });
     }

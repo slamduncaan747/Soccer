@@ -53,8 +53,38 @@ export interface PlayerProjection {
   teams: TeamProjection[];
 }
 
+// A single remaining group match, with its owners and a leverage score:
+// how much its result swings the title race (computed from the same MC samples).
+export interface FixtureProjection {
+  id: string;
+  home: string;
+  away: string;
+  homeOwner: string;
+  awayOwner: string;
+  kickoff?: string; // ISO
+  oddsHome?: ThreeWay;
+  // swing = max over players of |P(wins pool | home win) − P(wins pool | away win)|.
+  // The single most title-relevant number we can attach to a fixture.
+  swing: number;
+  swingPlayer?: string;          // the player whose title odds move most on this result
+  swingToward?: "home" | "away"; // which result helps that player
+}
+
+// Health of the live data pipeline, surfaced in the UI so users can see
+// whether projections are running on real markets or the fallback model.
+export interface DataStatus {
+  liveResults: boolean;             // football-data results merged in
+  groupSource: "kalshi" | "mock";
+  knockoutSource: "kalshi" | "mock";
+  fixturesWithOdds: number;
+  totalFixtures: number;
+  knockoutTeams: number;            // teams with knockout reach markets
+}
+
 export interface ProjectionResult {
   players: PlayerProjection[];
+  fixtures: FixtureProjection[];    // remaining group matches, sorted by swing desc
+  status: DataStatus;
   iterations: number;
   generatedAt: string;
   oddsSource: "kalshi" | "mock" | "mixed";

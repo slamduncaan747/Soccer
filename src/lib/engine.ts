@@ -1,6 +1,7 @@
 import { POOL, TEAM_OWNER, TeamSeed } from "../data/pool";
 import { pointsFor, POINTS, expectedMatchPoints } from "./scoring";
 import {
+  FixtureProjection,
   GroupFixture,
   KnockoutOdds,
   KNOCKOUT_STAGES,
@@ -152,19 +153,36 @@ export function runProjection(input: EngineInput): ProjectionResult {
     (ownerTeams.get(p) || []).reduce((s, t) => s + pointsFor(t.currentWins, 0, 0), 0)
   );
 
+  // ---- Fixture-leverage bookkeeping ----------------------------------------
+  // For every remaining group match with odds, we estimate how much its result
+  // swings each player's chance of WINNING THE POOL, straight from the MC draws:
+  // we bucket each iteration's fractional first-place credit by what this fixture
+  // did (home win vs away win), then compare the two conditional distributions.
+  const oddFixtures = input.groupFixtures.filter((f) => f.oddsHome);
+  const F = oddFixtures.length;
+  const P = players.length;
+  const outcome = new Int8Array(F); // per-iter: 0 home win, 1 draw, 2 away win
+  const homeN = new Float64Array(F);
+  const awayN = new Float64Array(F);
+  const homeFirst = new Float64Array(F * P); // Σ first-place credit when home won
+  const awayFirst = new Float64Array(F * P); // Σ first-place credit when away won
+  const firstCredit = new Float64Array(P);   // this iteration's rank-1 credit per player
+
   for (let it = 0; it < iterations; it++) {
     const pts = basePoints.slice();
 
     // 1) Group fixtures — one categorical draw each.
-    for (const f of input.groupFixtures) {
-      if (!f.oddsHome) continue;
+    for (let fi = 0; fi < F; fi++) {
+      const f = oddFixtures[fi];
       const r = rng();
-      const { win, draw } = f.oddsHome;
+      const { win, draw } = f.oddsHome!;
       if (r < win) {
+        outcome[fi] = 0;
         addWin(pts, playerIndex, f.home);
       } else if (r < win + draw) {
-        // draw — no points under win-only rule
+        outcome[fi] = 1; // draw — no points under win-only rule
       } else {
+        outcome[fi] = 2;
         addWin(pts, playerIndex, f.away);
       }
     }
@@ -207,7 +225,64 @@ export function runProjection(input: EngineInput): ProjectionResult {
       k = j;
     }
     for (let i = 0; i < players.length; i++) expFinalAccum[i] += pts[i];
+
+    // Capture this iteration's rank-1 (first place) credit per player: the top
+    // tied block shares position 0 equally; everyone else gets 0.
+    firstCredit.fill(0);
+    let topG = 1;
+    while (topG < order.length && order[topG].v === order[0].v) topG++;
+    const perTop = 1 / topG;
+    for (let m = 0; m < topG; m++) firstCredit[order[m].i] = perTop;
+
+    // Attribute that credit to each fixture's outcome bucket (home/away wins).
+    for (let fi = 0; fi < F; fi++) {
+      const o = outcome[fi];
+      if (o === 0) {
+        homeN[fi]++;
+        const base = fi * P;
+        for (let i = 0; i < P; i++) homeFirst[base + i] += firstCredit[i];
+      } else if (o === 2) {
+        awayN[fi]++;
+        const base = fi * P;
+        for (let i = 0; i < P; i++) awayFirst[base + i] += firstCredit[i];
+      }
+    }
   }
+
+  // ---- Resolve per-fixture swing from the conditional first-place rates -----
+  const fixtureProjections: FixtureProjection[] = oddFixtures.map((f, fi) => {
+    const base = fi * P;
+    let best = 0;
+    let bestPlayer: string | undefined;
+    let toward: "home" | "away" | undefined;
+    if (homeN[fi] > 0 && awayN[fi] > 0) {
+      for (let i = 0; i < P; i++) {
+        const pHome = homeFirst[base + i] / homeN[fi];
+        const pAway = awayFirst[base + i] / awayN[fi];
+        const d = Math.abs(pHome - pAway);
+        if (d > best) {
+          best = d;
+          bestPlayer = players[i];
+          toward = pHome > pAway ? "home" : "away";
+        }
+      }
+    }
+    return {
+      id: f.id,
+      home: f.home,
+      away: f.away,
+      homeOwner: TEAM_OWNER[f.home] ?? "—",
+      awayOwner: TEAM_OWNER[f.away] ?? "—",
+      kickoff: f.kickoff,
+      oddsHome: f.oddsHome,
+      swing: round4(best),
+      swingPlayer: bestPlayer,
+      swingToward: toward,
+    };
+  });
+  fixtureProjections.sort((a, b) => b.swing - a.swing);
+
+  const knockoutTeams = teams.filter((t) => t.reachFirst > 0).length;
 
   const playerProjections: PlayerProjection[] = players.map((p, i) => {
     const dist = finishCounts[i].map((c) => c / iterations);
@@ -229,6 +304,17 @@ export function runProjection(input: EngineInput): ProjectionResult {
 
   return {
     players: playerProjections,
+    fixtures: fixtureProjections,
+    status: {
+      // Sources are filled in by the orchestrator, which knows the real feed
+      // outcome; the engine only knows the counts it was handed.
+      liveResults: false,
+      groupSource: "mock",
+      knockoutSource: "mock",
+      fixturesWithOdds: F,
+      totalFixtures: input.groupFixtures.length,
+      knockoutTeams,
+    },
     iterations,
     generatedAt: new Date().toISOString(),
     oddsSource: "mixed",
