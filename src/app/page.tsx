@@ -5,11 +5,26 @@ import type { ProjectionResult, PlayerProjection, FixtureProjection } from "@/li
 
 type Tab = "matches" | "table";
 
-const PLAYER_COLORS: Record<string, string> = {
-  Sam: "#60a5fa", Wyatt: "#f59e0b", Duncan: "#a78bfa",
-  Conrad: "#f472b6", Gus: "#34d399", Isiah: "#fb923c",
+/* National team primary colors — used for odds bar segments */
+const TEAM_COLORS: Record<string, string> = {
+  Spain: "#c60b1e",      France: "#1a3f7f",      Brazil: "#009c3b",
+  Argentina: "#6babdf",  England: "#cf081f",      Germany: "#6b7280",
+  Portugal: "#016d38",   Netherlands: "#f36621",  Belgium: "#ed2939",
+  Uruguay: "#5eb6e4",    Croatia: "#e91b23",      Morocco: "#c1272d",
+  "United States": "#b22234", Mexico: "#006847",  Japan: "#bc002d",
+  Switzerland: "#cc0000", Senegal: "#00853f",     Colombia: "#f5c518",
+  Norway: "#ef2b2d",     Austria: "#ed2939",      Sweden: "#006aa7",
+  "South Korea": "#003478", Ecuador: "#ffd100",   "Ivory Coast": "#f77f00",
+  Australia: "#00843d",  "Czech Republic": "#d7141a", Türkiye: "#e30a17",
+  Egypt: "#ce1126",      Canada: "#cc0000",       Paraguay: "#d52b1e",
+  Iran: "#239f40",       "Saudi Arabia": "#006c35", Scotland: "#003f8a",
+  Tunisia: "#e70013",    "DR Congo": "#007fff",   Algeria: "#006233",
+  Qatar: "#8d1b3d",      Panama: "#da121a",       "Cape Verde": "#003893",
+  Ghana: "#006b3f",      Uzbekistan: "#1eb53a",   "South Africa": "#007a4d",
+  Bosnia: "#002395",     Iraq: "#ce1126",         Jordan: "#007a3d",
+  Haiti: "#00209f",      "New Zealand": "#00247d", Curacao: "#003da5",
 };
-const playerColor = (name: string) => PLAYER_COLORS[name] ?? "#666";
+const teamColor = (name: string) => TEAM_COLORS[name] ?? "#555";
 
 const FLAGS: Record<string, string> = {
   "Spain": "🇪🇸", "France": "🇫🇷", "Brazil": "🇧🇷", "Argentina": "🇦🇷",
@@ -60,8 +75,7 @@ export default function Page() {
           <span className="app-title">WC26 Pool</span>
           {leader && (
             <span className="app-leader-callout">
-              <strong style={{ color: playerColor(leader.player) }}>{leader.player}</strong>
-              {" "}leads · {leader.currentPoints} pts
+              <strong>{leader.player}</strong> leads · {leader.currentPoints} pts
             </span>
           )}
         </div>
@@ -111,7 +125,6 @@ function MatchesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
   const [selectedKey, setSelectedKey] = useState<string | null>(todayKey);
   const stripRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll selected chip into view
   useEffect(() => {
     const el = stripRef.current?.querySelector<HTMLButtonElement>(".day-chip.active");
     el?.scrollIntoView({ inline: "center", behavior: "smooth", block: "nearest" });
@@ -123,7 +136,6 @@ function MatchesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
 
   return (
     <div>
-      {/* ── Day strip ── */}
       <div className="day-strip-wrap">
         <div className="day-strip" ref={stripRef}>
           {groups.map((g) => (
@@ -139,11 +151,12 @@ function MatchesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
         </div>
       </div>
 
-      {/* ── Matches for selected day ── */}
       <div className="day-matches">
-        {activeGroup.matches.map((f) => (
-          <MatchCard key={f.id} fixture={f} />
-        ))}
+        {activeGroup.matches.length === 0 ? (
+          <div className="empty-state">No matches this day.</div>
+        ) : (
+          activeGroup.matches.map((f) => <MatchCard key={f.id} fixture={f} />)
+        )}
       </div>
     </div>
   );
@@ -160,24 +173,21 @@ function MatchCard({ fixture: f }: { fixture: FixtureProjection }) {
   const hp = odds ? Math.round(odds.win * 100) : null;
   const dp = odds ? Math.round(odds.draw * 100) : null;
   const ap = odds ? Math.round(odds.loss * 100) : null;
+  const hc = teamColor(f.home);
+  const ac = teamColor(f.away);
 
   return (
     <div className="match-card">
       <div className="match-card-teams">
-        {/* Home */}
         <div className="mc-team home">
           <span className="mc-flag">{flag(f.home)}</span>
           <span className="mc-name">{f.home}</span>
           <span className="mc-owner">{f.homeOwner}</span>
         </div>
-
-        {/* Center: time */}
         <div className="mc-center">
           <span className="mc-time">{tVal}</span>
           {tPeriod && <span className="mc-period">{tPeriod}</span>}
         </div>
-
-        {/* Away */}
         <div className="mc-team away">
           <span className="mc-flag">{flag(f.away)}</span>
           <span className="mc-name">{f.away}</span>
@@ -185,18 +195,17 @@ function MatchCard({ fixture: f }: { fixture: FixtureProjection }) {
         </div>
       </div>
 
-      {/* Odds */}
       {hp !== null && dp !== null && ap !== null && (
         <div className="mc-odds">
           <div className="odds-track">
-            <div className="odds-seg home-win" style={{ width: `${hp}%` }} />
-            <div className="odds-seg draw"     style={{ width: `${dp}%` }} />
-            <div className="odds-seg away-win" style={{ width: `${ap}%` }} />
+            <div className="odds-seg" style={{ width: `${hp}%`, background: hc }} />
+            <div className="odds-seg draw" style={{ width: `${dp}%` }} />
+            <div className="odds-seg" style={{ width: `${ap}%`, background: ac }} />
           </div>
           <div className="odds-labels">
-            <span>{hp}%</span>
+            <span style={{ color: hc }}>{hp}%</span>
             <span className="odds-label-mid">{dp}% draw</span>
-            <span>{ap}%</span>
+            <span style={{ color: ac }}>{ap}%</span>
           </div>
         </div>
       )}
@@ -221,20 +230,24 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
 
   return (
     <div className="standings-wrap">
+      <div className="standings-header">
+        <span className="sh-rank">#</span>
+        <span className="sh-player">Player</span>
+        <span className="sh-pts">Pts</span>
+      </div>
+
       {sorted.map((p, i) => {
         const isOpen = open === p.player;
         const isLeader = i === 0;
-        const color = isLeader ? "var(--green)" : playerColor(p.player);
         const pct = (p.currentPoints / maxPts) * 100;
 
         return (
           <div key={p.player}>
             <div
               className={`standing-row${isLeader ? " leader" : ""}`}
-              style={{ borderLeftColor: color }}
               onClick={() => setOpen(isOpen ? null : p.player)}
             >
-              <span className="row-rank" style={{ color }}>{i + 1}</span>
+              <span className="row-rank">{i + 1}</span>
               <div className="row-info">
                 <div className="row-name">{p.player}</div>
                 <div className="row-teams">
@@ -245,10 +258,10 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
                 <span className="row-pts">{p.currentPoints}</span>
                 <span className="row-pts-label">pts</span>
               </div>
-              <div className="row-progress" style={{ width: `${pct}%`, backgroundColor: color }} />
+              <div className="row-progress" style={{ width: `${pct}%` }} />
             </div>
 
-            {isOpen && <PlayerExpand player={p} color={color} />}
+            {isOpen && <PlayerExpand player={p} />}
           </div>
         );
       })}
@@ -256,18 +269,18 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
   );
 }
 
-function PlayerExpand({ player: p, color }: { player: PlayerProjection; color: string }) {
+function PlayerExpand({ player: p }: { player: PlayerProjection }) {
   const sorted = [...p.teams].sort((a, b) => b.currentPoints - a.currentPoints);
   return (
     <div className="standing-expand">
       <div className="expand-teams">
         {sorted.map((t) => (
           <div className="expand-team" key={t.team}>
-            <span className="et-name">{flag(t.team)} {t.team}</span>
-            <span
-              className={`et-pts${t.currentPoints === 0 ? " zero" : ""}`}
-              style={t.currentPoints > 0 ? { color } : undefined}
-            >
+            <span className="et-left">
+              <span className="et-flag">{flag(t.team)}</span>
+              <span className="et-name">{t.team}</span>
+            </span>
+            <span className={`et-pts${t.currentPoints === 0 ? " zero" : ""}`}>
               {t.currentPoints}
             </span>
           </div>
@@ -315,7 +328,20 @@ interface DayGroup {
 
 function groupByDay(fixtures: FixtureProjection[]): DayGroup[] {
   const now = new Date();
+  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const map = new Map<string, DayGroup>();
+
+  // Always seed yesterday and today so the strip always spans back to today
+  for (let offset = -2; offset <= 0; offset++) {
+    const d = new Date(todayMidnight);
+    d.setDate(todayMidnight.getDate() + offset);
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    const isToday = offset === 0;
+    const shortLabel = offset === -2 ? d.toLocaleDateString("en-US", { weekday: "short", day: "numeric" })
+      : offset === -1 ? "Yesterday"
+      : "Today";
+    map.set(key, { key, label: shortLabel, shortLabel, isToday, matches: [] });
+  }
 
   const sorted = [...fixtures].sort((a, b) => {
     if (!a.kickoff) return 1;
@@ -328,26 +354,31 @@ function groupByDay(fixtures: FixtureProjection[]): DayGroup[] {
     const key = d ? `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}` : "tbd";
     const isToday = d ? sameDay(d, now) : false;
 
-    const dayDiff = d
-      ? Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
-          - new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()) / 86400000)
-      : null;
+    if (!d) {
+      if (!map.has("tbd")) map.set("tbd", { key: "tbd", label: "TBD", shortLabel: "TBD", isToday: false, matches: [] });
+      map.get("tbd")!.matches.push(f);
+      continue;
+    }
 
-    const shortLabel = !d ? "TBD"
-      : dayDiff === -1 ? "Yesterday"
-      : dayDiff === 0  ? "Today"
-      : dayDiff === 1  ? "Tomorrow"
-      : d.toLocaleDateString("en-US", { weekday: "short", day: "numeric" });
-
-    const label = d
-      ? d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).toUpperCase()
-      : "TBD";
-
-    if (!map.has(key)) map.set(key, { key, label, shortLabel, isToday, matches: [] });
+    if (!map.has(key)) {
+      const dayDiff = Math.round(
+        (new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() - todayMidnight.getTime()) / 86400000
+      );
+      const shortLabel = dayDiff === 1 ? "Tomorrow"
+        : d.toLocaleDateString("en-US", { weekday: "short", day: "numeric" });
+      map.set(key, { key, label: shortLabel, shortLabel, isToday, matches: [] });
+    }
     map.get(key)!.matches.push(f);
   }
 
-  return [...map.values()];
+  // Sort map entries by date (tbd goes last)
+  return [...map.entries()]
+    .sort(([a], [b]) => {
+      if (a === "tbd") return 1;
+      if (b === "tbd") return -1;
+      return a < b ? -1 : a > b ? 1 : 0;
+    })
+    .map(([, g]) => g);
 }
 
 function sameDay(a: Date, b: Date) {
