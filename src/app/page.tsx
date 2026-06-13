@@ -1,11 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ProjectionResult, PlayerProjection, FixtureProjection } from "@/lib/types";
+import type { ProjectionResult, PlayerProjection, FixtureProjection, TeamProjection } from "@/lib/types";
 
-type Tab = "matches" | "table";
+type Tab = "matches" | "table" | "insights";
 
-// Display name overrides (Isiah goes by Zeke)
 const DISPLAY_NAME: Record<string, string> = { Isiah: "Zeke" };
 const displayName = (name: string) => DISPLAY_NAME[name] ?? name;
 
@@ -15,7 +14,6 @@ const PLAYER_COLORS: Record<string, string> = {
 };
 const playerColor = (name: string) => PLAYER_COLORS[name] ?? "#555";
 
-/* National team primary colors — used for odds bar segments */
 const TEAM_COLORS: Record<string, string> = {
   Spain: "#c60b1e",      France: "#1a3f7f",      Brazil: "#009c3b",
   Argentina: "#6babdf",  England: "#cf081f",      Germany: "#6b7280",
@@ -51,6 +49,8 @@ const FLAGS: Record<string, string> = {
   "Jordan": "🇯🇴", "Haiti": "🇭🇹", "New Zealand": "🇳🇿", "Curacao": "🇨🇼",
 };
 const flag = (team: string) => FLAGS[team] ?? "🏳️";
+const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
+const round1 = (n: number) => Math.round(n * 10) / 10;
 
 export default function Page() {
   const [data, setData]       = useState<ProjectionResult | null>(null);
@@ -60,7 +60,7 @@ export default function Page() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/leaderboard?iterations=1000", { cache: "no-store" });
+      const res = await fetch("/api/leaderboard?iterations=5000", { cache: "no-store" });
       setData((await res.json()) as ProjectionResult);
     } catch {
       setData(null);
@@ -85,7 +85,8 @@ export default function Page() {
           <span className="app-title">WC26 Pool</span>
           {leader && (
             <span className="app-leader-callout">
-              <strong>{displayName(leader.player)}</strong> leads · {leader.currentPoints} pts
+              <strong style={{ color: playerColor(leader.player) }}>{displayName(leader.player)}</strong>
+              {" "}leads · {leader.currentPoints} pts
             </span>
           )}
         </div>
@@ -104,22 +105,22 @@ export default function Page() {
           </div>
         ) : (
           <div className="tab-pane" key={tab}>
-            {tab === "matches"
-              ? <MatchesTab fixtures={data.fixtures} />
-              : <TableTab players={data.players} />
-            }
+            {tab === "matches"  && <MatchesTab fixtures={data.fixtures} />}
+            {tab === "table"    && <TableTab players={data.players} />}
+            {tab === "insights" && <InsightsTab players={data.players} fixtures={data.fixtures} />}
           </div>
         )}
       </main>
 
       <nav className="tab-bar" aria-label="Sections">
         <button className={`tab-btn ${tab === "matches" ? "active" : ""}`} onClick={() => setTab("matches")}>
-          <CalendarIcon />
-          Matches
+          <CalendarIcon /> Matches
         </button>
         <button className={`tab-btn ${tab === "table" ? "active" : ""}`} onClick={() => setTab("table")}>
-          <TableIcon />
-          Table
+          <TableIcon /> Table
+        </button>
+        <button className={`tab-btn ${tab === "insights" ? "active" : ""}`} onClick={() => setTab("insights")}>
+          <InsightsIcon /> Insights
         </button>
       </nav>
     </>
@@ -141,7 +142,6 @@ function MatchesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
   }, [selectedKey]);
 
   if (groups.length === 0) return <div className="empty-state">No fixtures available.</div>;
-
   const activeGroup = groups.find((g) => g.key === selectedKey) ?? groups[0];
 
   return (
@@ -160,13 +160,11 @@ function MatchesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
           ))}
         </div>
       </div>
-
       <div className="day-matches">
-        {activeGroup.matches.length === 0 ? (
-          <div className="empty-state">No matches this day.</div>
-        ) : (
-          activeGroup.matches.map((f) => <MatchCard key={f.id} fixture={f} />)
-        )}
+        {activeGroup.matches.length === 0
+          ? <div className="empty-state">No matches this day.</div>
+          : activeGroup.matches.map((f) => <MatchCard key={f.id} fixture={f} />)
+        }
       </div>
     </div>
   );
@@ -174,17 +172,12 @@ function MatchesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
 
 function MatchCard({ fixture: f }: { fixture: FixtureProjection }) {
   const d = f.kickoff ? new Date(f.kickoff) : null;
-  const timeStr = d
-    ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
-    : "TBD";
+  const timeStr = d ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }) : "TBD";
   const [tVal, tPeriod] = timeStr.split(" ");
-
   const odds = f.oddsHome;
   const hp = odds ? Math.round(odds.win * 100) : null;
   const dp = odds ? Math.round(odds.draw * 100) : null;
   const ap = odds ? Math.round(odds.loss * 100) : null;
-  const hc = teamColor(f.home);
-  const ac = teamColor(f.away);
 
   return (
     <div className="match-card">
@@ -204,18 +197,17 @@ function MatchCard({ fixture: f }: { fixture: FixtureProjection }) {
           <span className="mc-owner">{f.awayOwner}</span>
         </div>
       </div>
-
       {hp !== null && dp !== null && ap !== null && (
         <div className="mc-odds">
           <div className="odds-track">
-            <div className="odds-seg" style={{ width: `${hp}%`, background: hc }} />
+            <div className="odds-seg" style={{ width: `${hp}%`, background: teamColor(f.home) }} />
             <div className="odds-seg draw" style={{ width: `${dp}%` }} />
-            <div className="odds-seg" style={{ width: `${ap}%`, background: ac }} />
+            <div className="odds-seg" style={{ width: `${ap}%`, background: teamColor(f.away) }} />
           </div>
           <div className="odds-labels">
-            <span style={{ color: hc }}>{hp}%</span>
+            <span style={{ color: teamColor(f.home) }}>{hp}%</span>
             <span className="odds-label-mid">{dp}% draw</span>
-            <span style={{ color: ac }}>{ap}%</span>
+            <span style={{ color: teamColor(f.away) }}>{ap}%</span>
           </div>
         </div>
       )}
@@ -242,15 +234,26 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
     <div className="standings-wrap">
       <div className="standings-header">
         <span className="sh-rank">#</span>
-        <span className="sh-player">Player</span>
+        <span>Player</span>
+        <span className="sh-meta">Teams · Played</span>
         <span className="sh-pts">Pts</span>
       </div>
 
       {sorted.map((p, i) => {
         const isOpen = open === p.player;
         const isLeader = i === 0;
-        const pct = (p.currentPoints / maxPts) * 100;
-        const color = playerColor(p.player);
+        const ptPct = (p.currentPoints / maxPts) * 100;
+
+        // Teams remaining: still alive = no loss OR haven't finished group stage
+        const gamesPlayed = p.teams.reduce((s, t) => s + t.w + t.d + t.l, 0);
+        const teamsAlive = p.teams.filter((t) => {
+          const played = t.w + t.d + t.l;
+          // Eliminated if: played 2+ games with 0 pts and no draws
+          if (played >= 2 && t.currentPoints === 0 && t.d === 0) return false;
+          // Eliminated if: played all 3 group games with 0 pts
+          if (played >= 3 && t.currentPoints === 0) return false;
+          return true;
+        }).length;
 
         return (
           <div key={p.player}>
@@ -258,21 +261,27 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
               className={`standing-row${isLeader ? " leader" : ""}`}
               onClick={() => setOpen(isOpen ? null : p.player)}
             >
-              <span className="row-rank">{i + 1}</span>
-              <div className="row-avatar" aria-hidden style={{ background: color }}>
-                {displayName(p.player).charAt(0)}
-              </div>
+              <span className="row-rank" style={{ color: isLeader ? "var(--green)" : playerColor(p.player) }}>
+                {i + 1}
+              </span>
               <div className="row-info">
                 <div className="row-name">{displayName(p.player)}</div>
-                <div className="row-teams">
-                  {p.teams.slice(0, 4).map((t) => t.team).join(" · ")}
-                </div>
+              </div>
+              <div className="row-meta">
+                <span className="row-meta-stat">
+                  <span className="meta-val">{teamsAlive}</span>
+                  <span className="meta-label">/8 alive</span>
+                </span>
+                <span className="row-meta-stat">
+                  <span className="meta-val">{gamesPlayed}</span>
+                  <span className="meta-label">/24 played</span>
+                </span>
               </div>
               <div className="row-right">
                 <span className="row-pts">{p.currentPoints}</span>
                 <span className="row-pts-label">pts</span>
               </div>
-              <div className="row-progress" style={{ width: `${pct}%` }} />
+              <div className="row-progress" style={{ width: `${ptPct}%` }} />
             </div>
 
             {isOpen && <PlayerExpand player={p} />}
@@ -285,21 +294,194 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
 
 function PlayerExpand({ player: p }: { player: PlayerProjection }) {
   const sorted = [...p.teams].sort((a, b) => b.currentPoints - a.currentPoints);
+  const color = playerColor(p.player);
   return (
     <div className="standing-expand">
       <div className="expand-teams">
-        {sorted.map((t) => (
-          <div className="expand-team" key={t.team}>
-            <span className="et-left">
-              <span className="et-flag">{flag(t.team)}</span>
-              <span className="et-name">{t.team}</span>
-            </span>
-            <span className={`et-pts${t.currentPoints === 0 ? " zero" : ""}`}>
-              {t.currentPoints}
-            </span>
+        {sorted.map((t) => {
+          const played = t.w + t.d + t.l;
+          const record = played > 0 ? `${t.w}W ${t.d}D ${t.l}L` : "—";
+          return (
+            <div className="expand-team" key={t.team}>
+              <span className="et-left">
+                <span className="et-flag">{flag(t.team)}</span>
+                <span className="et-name">{t.team}</span>
+              </span>
+              <span className="et-record">{record}</span>
+              <span className={`et-pts${t.currentPoints === 0 ? " zero" : ""}`}
+                style={t.currentPoints > 0 ? { color } : undefined}>
+                {t.currentPoints}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   INSIGHTS TAB
+   ============================================================ */
+function InsightsTab({ players, fixtures }: { players: PlayerProjection[]; fixtures: FixtureProjection[] }) {
+  const sorted = useMemo(
+    () => [...players].sort((a, b) => b.pFirst - a.pFirst),
+    [players]
+  );
+  const maxWin = Math.max(...sorted.map((p) => p.pFirst), 0.01);
+  const topSwing = useMemo(
+    () => [...fixtures].filter((f) => f.swing > 0).sort((a, b) => b.swing - a.swing).slice(0, 5),
+    [fixtures]
+  );
+  const byPts = useMemo(
+    () => [...players].sort((a, b) => b.currentPoints - a.currentPoints),
+    [players]
+  );
+  const maxProj = Math.max(...players.map((p) => p.expectedFinalPoints), 1);
+
+  return (
+    <div className="insights-wrap">
+
+      {/* ── Win probability ── */}
+      <div className="insight-section">
+        <div className="insight-header">
+          <span className="insight-title">Win Probability</span>
+          <span className="insight-subtitle">Monte Carlo · {players[0]?.finishDistribution ? "5k sims" : ""}</span>
+        </div>
+        {sorted.map((p, i) => (
+          <div className="win-row" key={p.player}>
+            <div className="win-row-top">
+              <span className="win-name">{displayName(p.player)}</span>
+              <span className="win-pct" style={{ color: i === 0 ? "var(--green)" : "var(--t1)" }}>
+                {pct(p.pFirst)}
+              </span>
+            </div>
+            <div className="win-bar-track">
+              <div
+                className="win-bar-fill"
+                style={{
+                  width: `${(p.pFirst / maxWin) * 100}%`,
+                  background: i === 0 ? "var(--green)" : playerColor(p.player),
+                  opacity: i === 0 ? 1 : 0.7,
+                }}
+              />
+            </div>
+            <div className="win-sub">
+              <span>Top 3: {pct(p.pTop3)}</span>
+              <span>Proj: {round1(p.expectedFinalPoints)} pts</span>
+            </div>
           </div>
         ))}
       </div>
+
+      {/* ── Projected final standings ── */}
+      <div className="insight-section">
+        <div className="insight-header">
+          <span className="insight-title">Projected Final Points</span>
+          <span className="insight-subtitle">Expected wins × 3 pts</span>
+        </div>
+        {byPts.map((p) => (
+          <div className="proj-row" key={p.player}>
+            <span className="proj-name">{displayName(p.player)}</span>
+            <div className="proj-bars">
+              <div className="proj-current-bar" style={{
+                width: `${(p.currentPoints / maxProj) * 100}%`,
+                background: playerColor(p.player),
+              }} />
+              <div className="proj-expected-bar" style={{
+                width: `${((p.expectedFinalPoints - p.currentPoints) / maxProj) * 100}%`,
+                background: playerColor(p.player),
+                opacity: 0.25,
+              }} />
+            </div>
+            <div className="proj-nums">
+              <span className="proj-cur">{p.currentPoints}</span>
+              <span className="proj-arrow">→</span>
+              <span className="proj-exp">{round1(p.expectedFinalPoints)}</span>
+            </div>
+          </div>
+        ))}
+        <div className="proj-legend">
+          <span className="legend-solid" /> Earned &nbsp;
+          <span className="legend-dim" /> Projected
+        </div>
+      </div>
+
+      {/* ── Key matches ── */}
+      {topSwing.length > 0 && (
+        <div className="insight-section">
+          <div className="insight-header">
+            <span className="insight-title">Most Impactful Matches</span>
+            <span className="insight-subtitle">Swing = max title-odds shift</span>
+          </div>
+          {topSwing.map((f) => {
+            const d = f.kickoff ? new Date(f.kickoff) : null;
+            const timeLabel = d
+              ? d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+                + " · " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+              : "TBD";
+            const swingPct = Math.round(f.swing * 100);
+            const toward = f.swingToward === "home" ? f.home : f.swingToward === "away" ? f.away : null;
+            return (
+              <div className="swing-row" key={f.id}>
+                <div className="swing-matchup">
+                  <span>{flag(f.home)} {f.home}</span>
+                  <span className="swing-vs">vs</span>
+                  <span>{flag(f.away)} {f.away}</span>
+                </div>
+                <div className="swing-meta">
+                  <span className="swing-time">{timeLabel}</span>
+                  {f.swingPlayer && toward && (
+                    <span className="swing-note">
+                      <span style={{ color: playerColor(f.swingPlayer) }}>
+                        {displayName(f.swingPlayer)}
+                      </span>
+                      {" "}+{swingPct}% if {toward} wins
+                    </span>
+                  )}
+                </div>
+                <div className="swing-bar-track">
+                  <div className="swing-bar-fill" style={{ width: `${Math.min(swingPct * 2, 100)}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Finish distribution ── */}
+      <div className="insight-section">
+        <div className="insight-header">
+          <span className="insight-title">Finish Distribution</span>
+          <span className="insight-subtitle">P(finish in each place)</span>
+        </div>
+        <div className="finish-grid">
+          {byPts.map((p) => (
+            <div className="finish-player" key={p.player}>
+              <div className="finish-name">{displayName(p.player)}</div>
+              <div className="finish-bars">
+                {p.finishDistribution.map((prob, place) => (
+                  <div
+                    key={place}
+                    className="finish-bar"
+                    style={{
+                      height: `${Math.max(prob * 100 * 4, 2)}%`,
+                      background: place === 0 ? "var(--green)" : playerColor(p.player),
+                      opacity: place === 0 ? 1 : 0.6 - place * 0.05,
+                    }}
+                    title={`P(${place + 1}): ${pct(prob)}`}
+                  />
+                ))}
+              </div>
+              <div className="finish-label">
+                <span>1st</span>
+                <span>{p.finishDistribution.length}th</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
     </div>
   );
 }
@@ -328,6 +510,14 @@ function TableIcon() {
     </svg>
   );
 }
+function InsightsIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M3 17l4-6 4 3 4-7 4 4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="21" cy="11" r="1.5" fill="currentColor" />
+    </svg>
+  );
+}
 
 /* ============================================================
    HELPERS
@@ -345,15 +535,14 @@ function groupByDay(fixtures: FixtureProjection[]): DayGroup[] {
   const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const map = new Map<string, DayGroup>();
 
-  // Always seed yesterday and today so the strip always spans back to today
   for (let offset = -2; offset <= 0; offset++) {
     const d = new Date(todayMidnight);
     d.setDate(todayMidnight.getDate() + offset);
     const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
     const isToday = offset === 0;
-    const shortLabel = offset === -2 ? d.toLocaleDateString("en-US", { weekday: "short", day: "numeric" })
-      : offset === -1 ? "Yesterday"
-      : "Today";
+    const shortLabel = offset === -2
+      ? d.toLocaleDateString("en-US", { weekday: "short", day: "numeric" })
+      : offset === -1 ? "Yesterday" : "Today";
     map.set(key, { key, label: shortLabel, shortLabel, isToday, matches: [] });
   }
 
@@ -385,7 +574,6 @@ function groupByDay(fixtures: FixtureProjection[]): DayGroup[] {
     map.get(key)!.matches.push(f);
   }
 
-  // Sort map entries by date (tbd goes last)
   return [...map.entries()]
     .sort(([a], [b]) => {
       if (a === "tbd") return 1;

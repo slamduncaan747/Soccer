@@ -38,6 +38,9 @@ export interface KnockoutOdds {
 export interface TeamProjection {
   team: string;
   owner: string;
+  w: number;
+  d: number;
+  l: number;
   currentPoints: number;
   expectedRemainingWins: number;
   expectedFinalPoints: number;

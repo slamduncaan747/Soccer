@@ -127,9 +127,13 @@ export function runProjection(input: EngineInput): ProjectionResult {
     const grpWins = groupExpectedWins(t.name, input.groupFixtures);
     const expRemaining = grpWins + t.expRemainingWins;
     const currentPoints = pointsFor(t.currentWins, 0, 0); // wins only score
+    const rec = input.records.find((r) => r.name === t.name);
     return {
       team: t.name,
       owner: t.owner,
+      w: rec?.w ?? 0,
+      d: rec?.d ?? 0,
+      l: rec?.l ?? 0,
       currentPoints,
       expectedRemainingWins: round2(expRemaining),
       expectedFinalPoints: round2(currentPoints + expRemaining * POINTS.win),
