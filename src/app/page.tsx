@@ -141,31 +141,35 @@ function MatchesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
 }
 
 function MatchRow({ fixture: f }: { fixture: FixtureProjection }) {
-  const time = f.kickoff
-    ? new Date(f.kickoff).toLocaleTimeString("en-US", {
-        hour: "numeric", minute: "2-digit",
-      })
+  const d = f.kickoff ? new Date(f.kickoff) : null;
+  const timeStr = d
+    ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
     : "TBD";
+  const timeParts = timeStr.split(" ");
+  const timeVal = timeParts[0];
+  const period = timeParts[1] ?? "";
 
   return (
     <div className="match-row">
-      {/* Home */}
-      <div className="match-side">
-        <span className="team-flag">{flag(f.home)}</span>
-        <span className="team-name">{f.home}</span>
-        <span className="owner-name">{f.homeOwner}</span>
-      </div>
-
-      {/* Center: time */}
       <div className="match-time-col">
-        <span className="kickoff-time">{time}</span>
+        <span className="time-val">{timeVal}</span>
+        {period && <span className="time-period">{period}</span>}
       </div>
-
-      {/* Away */}
-      <div className="match-side right">
-        <span className="team-flag">{flag(f.away)}</span>
-        <span className="team-name">{f.away}</span>
-        <span className="owner-name">{f.awayOwner}</span>
+      <div className="match-teams-col">
+        <div className="team-line">
+          <div className="team-line-left">
+            <span className="team-flag">{flag(f.home)}</span>
+            <span className="team-name">{f.home}</span>
+          </div>
+          <span className="owner-name">{f.homeOwner}</span>
+        </div>
+        <div className="team-line">
+          <div className="team-line-left">
+            <span className="team-flag">{flag(f.away)}</span>
+            <span className="team-name">{f.away}</span>
+          </div>
+          <span className="owner-name">{f.awayOwner}</span>
+        </div>
       </div>
     </div>
   );
