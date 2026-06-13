@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectionResult, PlayerProjection, FixtureProjection } from "@/lib/types";
 
 type Tab = "matches" | "table";
@@ -9,7 +9,7 @@ const PLAYER_COLORS: Record<string, string> = {
   Sam: "#60a5fa", Wyatt: "#f59e0b", Duncan: "#a78bfa",
   Conrad: "#f472b6", Gus: "#34d399", Isiah: "#fb923c",
 };
-const playerColor = (name: string) => PLAYER_COLORS[name] ?? "#888";
+const playerColor = (name: string) => PLAYER_COLORS[name] ?? "#666";
 
 const FLAGS: Record<string, string> = {
   "Spain": "🇪🇸", "France": "🇫🇷", "Brazil": "🇧🇷", "Argentina": "🇦🇷",
@@ -55,33 +55,28 @@ export default function Page() {
 
   return (
     <>
-      {/* ── Header ── */}
       <header className="app-header">
         <div className="app-header-inner">
           <span className="app-title">WC26 Pool</span>
           {leader && (
             <span className="app-leader-callout">
-              <strong>{leader.player}</strong> leads · {leader.currentPoints} pts
+              <strong style={{ color: playerColor(leader.player) }}>{leader.player}</strong>
+              {" "}leads · {leader.currentPoints} pts
             </span>
           )}
         </div>
       </header>
 
-      {/* ── Content ── */}
       <main className="page">
         {loading ? (
           <div className="loading-state">Loading…</div>
         ) : !data ? (
           <div className="empty-state">
             Could not load data.{" "}
-            <button
-              onClick={load}
-              style={{ color: "var(--green)", background: "none", border: "none",
-                       cursor: "pointer", fontFamily: "inherit", fontSize: "inherit",
-                       fontWeight: 700 }}
-            >
-              Retry
-            </button>
+            <button onClick={load} style={{
+              color: "var(--green)", background: "none", border: "none",
+              cursor: "pointer", fontFamily: "inherit", fontSize: "inherit", fontWeight: 700,
+            }}>Retry</button>
           </div>
         ) : (
           <div className="tab-pane" key={tab}>
@@ -93,19 +88,12 @@ export default function Page() {
         )}
       </main>
 
-      {/* ── Bottom tab bar ── */}
       <nav className="tab-bar" aria-label="Sections">
-        <button
-          className={`tab-btn ${tab === "matches" ? "active" : ""}`}
-          onClick={() => setTab("matches")}
-        >
+        <button className={`tab-btn ${tab === "matches" ? "active" : ""}`} onClick={() => setTab("matches")}>
           <CalendarIcon />
           Matches
         </button>
-        <button
-          className={`tab-btn ${tab === "table" ? "active" : ""}`}
-          onClick={() => setTab("table")}
-        >
+        <button className={`tab-btn ${tab === "table" ? "active" : ""}`} onClick={() => setTab("table")}>
           <TableIcon />
           Table
         </button>
@@ -119,61 +107,99 @@ export default function Page() {
    ============================================================ */
 function MatchesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
   const groups = useMemo(() => groupByDay(fixtures), [fixtures]);
+  const todayKey = groups.find((g) => g.isToday)?.key ?? groups[0]?.key ?? null;
+  const [selectedKey, setSelectedKey] = useState<string | null>(todayKey);
+  const stripRef = useRef<HTMLDivElement>(null);
 
-  if (groups.length === 0) {
-    return <div className="empty-state">No fixtures available.</div>;
-  }
+  // Auto-scroll selected chip into view
+  useEffect(() => {
+    const el = stripRef.current?.querySelector<HTMLButtonElement>(".day-chip.active");
+    el?.scrollIntoView({ inline: "center", behavior: "smooth", block: "nearest" });
+  }, [selectedKey]);
+
+  if (groups.length === 0) return <div className="empty-state">No fixtures available.</div>;
+
+  const activeGroup = groups.find((g) => g.key === selectedKey) ?? groups[0];
 
   return (
     <div>
-      {groups.map(({ key, label, isToday, matches }) => (
-        <div className="day-section" key={key}>
-          <div className={`day-label ${isToday ? "today-label" : ""}`}>
-            {isToday && <span className="today-pip" />}
-            {isToday ? "TODAY" : label}
-          </div>
-          <div className="day-card">
-            {matches.map((f) => (
-              <MatchRow key={f.id} fixture={f} isToday={isToday} />
-            ))}
-          </div>
+      {/* ── Day strip ── */}
+      <div className="day-strip-wrap">
+        <div className="day-strip" ref={stripRef}>
+          {groups.map((g) => (
+            <button
+              key={g.key}
+              className={`day-chip${selectedKey === g.key ? " active" : ""}${g.isToday ? " is-today" : ""}`}
+              onClick={() => setSelectedKey(g.key)}
+            >
+              {g.isToday && <span className="chip-pip" />}
+              {g.shortLabel}
+            </button>
+          ))}
         </div>
-      ))}
+      </div>
+
+      {/* ── Matches for selected day ── */}
+      <div className="day-matches">
+        {activeGroup.matches.map((f) => (
+          <MatchCard key={f.id} fixture={f} />
+        ))}
+      </div>
     </div>
   );
 }
 
-function MatchRow({ fixture: f, isToday }: { fixture: FixtureProjection; isToday: boolean }) {
+function MatchCard({ fixture: f }: { fixture: FixtureProjection }) {
   const d = f.kickoff ? new Date(f.kickoff) : null;
   const timeStr = d
     ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
     : "TBD";
-  const timeParts = timeStr.split(" ");
-  const timeVal = timeParts[0];
-  const period = timeParts[1] ?? "";
+  const [tVal, tPeriod] = timeStr.split(" ");
+
+  const odds = f.oddsHome;
+  const hp = odds ? Math.round(odds.win * 100) : null;
+  const dp = odds ? Math.round(odds.draw * 100) : null;
+  const ap = odds ? Math.round(odds.loss * 100) : null;
 
   return (
-    <div className={`match-row${isToday ? " today" : ""}`}>
-      <div className="match-time-col">
-        <span className="time-val">{timeVal}</span>
-        {period && <span className="time-period">{period}</span>}
-      </div>
-      <div className="match-teams-col">
-        <div className="team-line">
-          <div className="team-line-left">
-            <span className="team-flag">{flag(f.home)}</span>
-            <span className="team-name">{f.home}</span>
-          </div>
-          <span className="owner-name">{f.homeOwner}</span>
+    <div className="match-card">
+      <div className="match-card-teams">
+        {/* Home */}
+        <div className="mc-team home">
+          <span className="mc-flag">{flag(f.home)}</span>
+          <span className="mc-name">{f.home}</span>
+          <span className="mc-owner">{f.homeOwner}</span>
         </div>
-        <div className="team-line">
-          <div className="team-line-left">
-            <span className="team-flag">{flag(f.away)}</span>
-            <span className="team-name">{f.away}</span>
-          </div>
-          <span className="owner-name">{f.awayOwner}</span>
+
+        {/* Center: time */}
+        <div className="mc-center">
+          <span className="mc-time">{tVal}</span>
+          {tPeriod && <span className="mc-period">{tPeriod}</span>}
+        </div>
+
+        {/* Away */}
+        <div className="mc-team away">
+          <span className="mc-flag">{flag(f.away)}</span>
+          <span className="mc-name">{f.away}</span>
+          <span className="mc-owner">{f.awayOwner}</span>
         </div>
       </div>
+
+      {/* Odds */}
+      {hp !== null && dp !== null && ap !== null && (
+        <div className="mc-odds">
+          <div className="odds-track">
+            <div className="odds-seg home-win" style={{ width: `${hp}%` }} />
+            <div className="odds-seg draw"     style={{ width: `${dp}%` }} />
+            <div className="odds-seg away-win" style={{ width: `${ap}%` }} />
+          </div>
+          <div className="odds-labels">
+            <span>{hp}%</span>
+            <span className="odds-label-mid">{dp}% draw</span>
+            <span>{ap}%</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -185,12 +211,9 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
   const [open, setOpen] = useState<string | null>(null);
 
   const sorted = useMemo(
-    () =>
-      [...players].sort(
-        (a, b) =>
-          b.currentPoints - a.currentPoints ||
-          b.expectedFinalPoints - a.expectedFinalPoints
-      ),
+    () => [...players].sort(
+      (a, b) => b.currentPoints - a.currentPoints || b.expectedFinalPoints - a.expectedFinalPoints
+    ),
     [players]
   );
 
@@ -198,46 +221,34 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
 
   return (
     <div className="standings-wrap">
-      <div className="standings-col-heads">
-        <span>#</span>
-        <span>Player</span>
-        <span className="col-pts">Pts</span>
-      </div>
-
       {sorted.map((p, i) => {
         const isOpen = open === p.player;
-        const preview = p.teams
-          .slice(0, 3)
-          .map((t) => t.team)
-          .join(" · ");
-        const color = i === 0 ? "var(--green)" : playerColor(p.player);
-        const progressPct = (p.currentPoints / maxPts) * 100;
+        const isLeader = i === 0;
+        const color = isLeader ? "var(--green)" : playerColor(p.player);
+        const pct = (p.currentPoints / maxPts) * 100;
 
         return (
           <div key={p.player}>
             <div
-              className={`standing-row ${i === 0 ? "leader" : ""}`}
-              onClick={() => setOpen(isOpen ? null : p.player)}
+              className={`standing-row${isLeader ? " leader" : ""}`}
               style={{ borderLeftColor: color }}
+              onClick={() => setOpen(isOpen ? null : p.player)}
             >
-              <span className="row-rank">{i + 1}</span>
+              <span className="row-rank" style={{ color }}>{i + 1}</span>
               <div className="row-info">
                 <div className="row-name">{p.player}</div>
-                <div className="row-teams">{preview}</div>
+                <div className="row-teams">
+                  {p.teams.slice(0, 4).map((t) => t.team).join(" · ")}
+                </div>
               </div>
-              <div className="row-pts-wrap">
+              <div className="row-right">
                 <span className="row-pts">{p.currentPoints}</span>
+                <span className="row-pts-label">pts</span>
               </div>
-              <div
-                className="row-progress"
-                style={{
-                  width: `${progressPct}%`,
-                  backgroundColor: color,
-                }}
-              />
+              <div className="row-progress" style={{ width: `${pct}%`, backgroundColor: color }} />
             </div>
 
-            {isOpen && <PlayerExpand player={p} />}
+            {isOpen && <PlayerExpand player={p} color={color} />}
           </div>
         );
       })}
@@ -245,22 +256,20 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
   );
 }
 
-function PlayerExpand({ player: p }: { player: PlayerProjection }) {
+function PlayerExpand({ player: p, color }: { player: PlayerProjection; color: string }) {
   const sorted = [...p.teams].sort((a, b) => b.currentPoints - a.currentPoints);
-  const color = playerColor(p.player);
   return (
     <div className="standing-expand">
       <div className="expand-teams">
         {sorted.map((t) => (
           <div className="expand-team" key={t.team}>
-            <span className="et-name" style={{ color }}>
-              {flag(t.team)} {t.team}
+            <span className="et-name">{flag(t.team)} {t.team}</span>
+            <span
+              className={`et-pts${t.currentPoints === 0 ? " zero" : ""}`}
+              style={t.currentPoints > 0 ? { color } : undefined}
+            >
+              {t.currentPoints}
             </span>
-            <div className="et-right">
-              <span className={`et-pts ${t.currentPoints === 0 ? "zero" : ""}`}>
-                {t.currentPoints} pts
-              </span>
-            </div>
           </div>
         ))}
       </div>
@@ -269,7 +278,7 @@ function PlayerExpand({ player: p }: { player: PlayerProjection }) {
 }
 
 /* ============================================================
-   SVG ICONS
+   ICONS
    ============================================================ */
 function CalendarIcon() {
   return (
@@ -283,7 +292,6 @@ function CalendarIcon() {
     </svg>
   );
 }
-
 function TableIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -300,6 +308,7 @@ function TableIcon() {
 interface DayGroup {
   key: string;
   label: string;
+  shortLabel: string;
   isToday: boolean;
   matches: FixtureProjection[];
 }
@@ -316,29 +325,33 @@ function groupByDay(fixtures: FixtureProjection[]): DayGroup[] {
 
   for (const f of sorted) {
     const d = f.kickoff ? new Date(f.kickoff) : null;
-    const key = d
-      ? `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
-      : "tbd";
+    const key = d ? `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}` : "tbd";
     const isToday = d ? sameDay(d, now) : false;
+
+    const dayDiff = d
+      ? Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+          - new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()) / 86400000)
+      : null;
+
+    const shortLabel = !d ? "TBD"
+      : dayDiff === -1 ? "Yesterday"
+      : dayDiff === 0  ? "Today"
+      : dayDiff === 1  ? "Tomorrow"
+      : d.toLocaleDateString("en-US", { weekday: "short", day: "numeric" });
+
     const label = d
-      ? isToday
-        ? "TODAY"
-        : d.toLocaleDateString("en-US", {
-            weekday: "short", month: "short", day: "numeric",
-          }).toUpperCase()
+      ? d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).toUpperCase()
       : "TBD";
 
-    if (!map.has(key)) map.set(key, { key, label, isToday, matches: [] });
+    if (!map.has(key)) map.set(key, { key, label, shortLabel, isToday, matches: [] });
     map.get(key)!.matches.push(f);
   }
 
   return [...map.values()];
 }
 
-function sameDay(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
+function sameDay(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate();
 }
