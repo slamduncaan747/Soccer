@@ -9,18 +9,13 @@ type Tab = "matches" | "table";
 const DISPLAY_NAME: Record<string, string> = { Isiah: "Zeke" };
 const displayName = (name: string) => DISPLAY_NAME[name] ?? name;
 
-// Avatar crops from /avatars/group.jpeg (738×864, 5 equal rows)
-// Each row center Y: 86, 259, 432, 605, 778. Avatar ~110px diam at x≈78.
-// Scaled to 40px circle: factor=40/110=0.364; img→268×314; offsetX=-8px
-const GROUP_SRC = "/avatars/group.jpeg";
-const GROUP_SIZE = "268px 314px";
-const AVATAR_STYLE: Record<string, React.CSSProperties> = {
-  Wyatt:  { backgroundImage: `url('${GROUP_SRC}')`, backgroundSize: GROUP_SIZE, backgroundPosition: "-8px -11px" },
-  Isiah:  { backgroundImage: `url('${GROUP_SRC}')`, backgroundSize: GROUP_SIZE, backgroundPosition: "-8px -74px" },
-  Sam:    { backgroundImage: `url('${GROUP_SRC}')`, backgroundSize: GROUP_SIZE, backgroundPosition: "-8px -137px" },
-  Conrad: { backgroundImage: `url('${GROUP_SRC}')`, backgroundSize: GROUP_SIZE, backgroundPosition: "-8px -200px" },
-  Gus:    { backgroundImage: `url('${GROUP_SRC}')`, backgroundSize: GROUP_SIZE, backgroundPosition: "-8px -263px" },
-  Duncan: { backgroundImage: "url('/avatars/duncan.jpeg')", backgroundSize: "55px 55px", backgroundPosition: "-8px -8px" },
+const AVATAR_SRC: Record<string, string> = {
+  Wyatt:  "/avatars/wyatt.jpeg",
+  Isiah:  "/avatars/isiah.jpeg",
+  Sam:    "/avatars/sam.jpeg",
+  Conrad: "/avatars/conrad.jpeg",
+  Gus:    "/avatars/gus.jpeg",
+  Duncan: "/avatars/duncan_sq.jpeg",
 };
 
 /* National team primary colors — used for odds bar segments */
@@ -258,7 +253,7 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
         const isOpen = open === p.player;
         const isLeader = i === 0;
         const pct = (p.currentPoints / maxPts) * 100;
-        const avatarStyle = AVATAR_STYLE[p.player];
+        const avatarSrc = AVATAR_SRC[p.player];
 
         return (
           <div key={p.player}>
@@ -267,7 +262,12 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
               onClick={() => setOpen(isOpen ? null : p.player)}
             >
               <span className="row-rank">{i + 1}</span>
-              <div className="row-avatar" style={avatarStyle} aria-hidden />
+              <div className="row-avatar" aria-hidden>
+                {avatarSrc && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={avatarSrc} alt="" width={40} height={40} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%", display: "block" }} />
+                )}
+              </div>
               <div className="row-info">
                 <div className="row-name">{displayName(p.player)}</div>
                 <div className="row-teams">
