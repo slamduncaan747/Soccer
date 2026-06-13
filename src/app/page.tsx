@@ -5,6 +5,22 @@ import type { ProjectionResult, PlayerProjection, FixtureProjection } from "@/li
 
 type Tab = "matches" | "table";
 
+const FLAGS: Record<string, string> = {
+  "Spain": "🇪🇸", "France": "🇫🇷", "Brazil": "🇧🇷", "Argentina": "🇦🇷",
+  "England": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "Germany": "🇩🇪", "Portugal": "🇵🇹", "Netherlands": "🇳🇱",
+  "Belgium": "🇧🇪", "Uruguay": "🇺🇾", "Croatia": "🇭🇷", "Morocco": "🇲🇦",
+  "United States": "🇺🇸", "Mexico": "🇲🇽", "Japan": "🇯🇵", "Switzerland": "🇨🇭",
+  "Senegal": "🇸🇳", "Colombia": "🇨🇴", "Norway": "🇳🇴", "Austria": "🇦🇹",
+  "Sweden": "🇸🇪", "South Korea": "🇰🇷", "Ecuador": "🇪🇨", "Ivory Coast": "🇨🇮",
+  "Australia": "🇦🇺", "Czech Republic": "🇨🇿", "Türkiye": "🇹🇷", "Egypt": "🇪🇬",
+  "Canada": "🇨🇦", "Paraguay": "🇵🇾", "Iran": "🇮🇷", "Saudi Arabia": "🇸🇦",
+  "Scotland": "🏴󠁧󠁢󠁳󠁣󠁴󠁿", "Tunisia": "🇹🇳", "DR Congo": "🇨🇩", "Algeria": "🇩🇿",
+  "Qatar": "🇶🇦", "Panama": "🇵🇦", "Cape Verde": "🇨🇻", "Ghana": "🇬🇭",
+  "Uzbekistan": "🇺🇿", "South Africa": "🇿🇦", "Bosnia": "🇧🇦", "Iraq": "🇮🇶",
+  "Jordan": "🇯🇴", "Haiti": "🇭🇹", "New Zealand": "🇳🇿", "Curacao": "🇨🇼",
+};
+const flag = (team: string) => FLAGS[team] ?? "🏳️";
+
 export default function Page() {
   const [data, setData]       = useState<ProjectionResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -135,20 +151,21 @@ function MatchRow({ fixture: f }: { fixture: FixtureProjection }) {
     <div className="match-row">
       {/* Home */}
       <div className="match-side">
+        <span className="team-flag">{flag(f.home)}</span>
         <span className="team-name">{f.home}</span>
-        <span className="owner-badge">{f.homeOwner}</span>
+        <span className="owner-name">{f.homeOwner}</span>
       </div>
 
-      {/* Center */}
+      {/* Center: time */}
       <div className="match-time-col">
         <span className="kickoff-time">{time}</span>
-        <span className="kickoff-sep" />
       </div>
 
       {/* Away */}
       <div className="match-side right">
+        <span className="team-flag">{flag(f.away)}</span>
         <span className="team-name">{f.away}</span>
-        <span className="owner-badge">{f.awayOwner}</span>
+        <span className="owner-name">{f.awayOwner}</span>
       </div>
     </div>
   );
@@ -217,7 +234,7 @@ function PlayerExpand({ player: p }: { player: PlayerProjection }) {
       <div className="expand-teams">
         {sorted.map((t) => (
           <div className="expand-team" key={t.team}>
-            <span className="et-name">{t.team}</span>
+            <span className="et-name">{flag(t.team)} {t.team}</span>
             <div className="et-right">
               <span className="et-record">{t.currentPoints / 3}W</span>
               <span className={`et-pts ${t.currentPoints === 0 ? "zero" : ""}`}>

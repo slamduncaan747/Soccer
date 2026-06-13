@@ -128,7 +128,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 4px 10px;
+  padding: 20px 4px 10px;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.07em;
@@ -136,6 +136,7 @@ body {
   color: var(--t3);
 }
 .day-label.today-label { color: var(--green); }
+.day-section:first-child .day-label { padding-top: 8px; }
 .today-pip {
   width: 5px; height: 5px;
   border-radius: 50%;
@@ -153,10 +154,10 @@ body {
 
 .match-row {
   display: grid;
-  grid-template-columns: 1fr 56px 1fr;
+  grid-template-columns: 1fr 52px 1fr;
   align-items: center;
-  padding: 16px 16px;
-  gap: 8px;
+  padding: 13px 16px;
+  gap: 6px;
 }
 .match-row + .match-row {
   border-top: 1px solid var(--line);
@@ -166,32 +167,32 @@ body {
 .match-side {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 .match-side.right { align-items: flex-end; }
 
+.team-flag {
+  font-size: 22px;
+  line-height: 1;
+  display: block;
+  margin-bottom: 2px;
+}
+
 .team-name {
-  font-size: 19px;
-  font-weight: 800;
-  letter-spacing: -0.03em;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
   color: var(--t1);
   line-height: 1;
 }
 
-/* Owner badge — key pool context */
-.owner-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 7px;
-  border-radius: 4px;
-  background: var(--card-hi);
-  border: 1px solid var(--line-2);
-  font-size: 10px;
-  font-weight: 700;
+/* Owner — small, plain, no box */
+.owner-name {
+  font-size: 11px;
+  font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--t2);
-  line-height: 1;
+  color: var(--t3);
 }
 
 /* Center: kickoff time */
@@ -199,20 +200,13 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
 }
 .kickoff-time {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   color: var(--t2);
   white-space: nowrap;
-}
-.kickoff-sep {
-  width: 16px;
-  height: 1px;
-  background: var(--line-2);
-  border-radius: 1px;
 }
 
 /* ──────────────────────────────────────
