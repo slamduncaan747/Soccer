@@ -1,17 +1,25 @@
 /* WC26 Pool — Sports App */
 
 :root {
-  --bg:        #0a0a0a;
-  --card:      #111111;
-  --card-hi:   #161616;
-  --line:      #1e1e1e;
-  --line-2:    #252525;
-  --t1:        #f5f5f5;
-  --t2:        #777777;
-  --t3:        #333333;
+  --bg:        #080808;
+  --card:      #0f0f0f;
+  --card-2:    #141414;
+  --line:      #1a1a1a;
+  --line-2:    #222222;
+  --t1:        #efefef;
+  --t2:        #606060;
+  --t3:        #2a2a2a;
   --green:     #4ade80;
-  --green-bg:  rgba(74, 222, 128, 0.08);
+  --green-bg:  rgba(74, 222, 128, 0.07);
   --font:      -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+
+  /* Player colors */
+  --c-sam:    #60a5fa;
+  --c-wyatt:  #f59e0b;
+  --c-duncan: #a78bfa;
+  --c-conrad: #f472b6;
+  --c-gus:    #34d399;
+  --c-isiah:  #fb923c;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -23,7 +31,6 @@ body {
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  /* bottom nav + safe area */
   padding-bottom: calc(64px + env(safe-area-inset-bottom));
   overflow-x: hidden;
 }
@@ -36,7 +43,7 @@ body {
   top: 0;
   z-index: 20;
   padding-top: env(safe-area-inset-top);
-  background: rgba(10,10,10,0.88);
+  background: rgba(8,8,8,0.90);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   border-bottom: 1px solid var(--line);
@@ -72,7 +79,7 @@ body {
   bottom: 0; left: 0; right: 0;
   z-index: 20;
   padding-bottom: env(safe-area-inset-bottom);
-  background: rgba(10,10,10,0.96);
+  background: rgba(8,8,8,0.96);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   border-top: 1px solid var(--line);
@@ -110,7 +117,6 @@ body {
   padding: 8px 0 0;
 }
 
-/* Tab pane fade on switch */
 .tab-pane {
   animation: tabFade 0.18s ease;
 }
@@ -120,7 +126,7 @@ body {
 }
 
 /* ──────────────────────────────────────
-   MATCHES — DAY CARDS
+   MATCHES — DAY SECTIONS
 ────────────────────────────────────── */
 .day-section { margin: 0 12px 16px; }
 
@@ -133,18 +139,19 @@ body {
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--t3);
+  color: var(--t2);
 }
 .day-label.today-label { color: var(--green); }
 .day-section:first-child .day-label { padding-top: 8px; }
 .today-pip {
-  width: 5px; height: 5px;
+  width: 6px; height: 6px;
   border-radius: 50%;
   background: var(--green);
   flex-shrink: 0;
+  box-shadow: 0 0 6px var(--green);
 }
 
-/* Single card wrapping all matches in a day */
+/* Card wrapping all matches in a day */
 .day-card {
   background: var(--card);
   border-radius: 14px;
@@ -152,9 +159,7 @@ body {
   border: 1px solid var(--line-2);
 }
 
-/* ── Match row: FotMob-style stacked layout ──
-   Left column: kickoff time
-   Right column: home team (top) / away team (bottom)          */
+/* ── Match row: FotMob-style stacked layout ── */
 .match-row {
   display: grid;
   grid-template-columns: 48px 1fr;
@@ -166,17 +171,24 @@ body {
   border-top: 1px solid var(--line);
 }
 
+/* Today highlight */
+.match-row.today {
+  border-left: 2px solid var(--green);
+  padding-left: 12px;
+  margin-left: -2px;
+}
+
 /* Time column */
 .match-time-col {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1px;
+  gap: 2px;
   flex-shrink: 0;
 }
 .time-val {
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--t2);
   letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
@@ -215,7 +227,7 @@ body {
   flex-shrink: 0;
 }
 .team-name {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--t1);
@@ -229,8 +241,8 @@ body {
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--t3);
   flex-shrink: 0;
+  /* color is set via inline style per player */
 }
 
 /* ──────────────────────────────────────
@@ -238,7 +250,6 @@ body {
 ────────────────────────────────────── */
 .standings-wrap { padding: 4px 0 0; }
 
-/* Subtle section divider */
 .standings-col-heads {
   display: grid;
   grid-template-columns: 28px 1fr 60px;
@@ -254,15 +265,18 @@ body {
 .standings-col-heads .col-pts { text-align: right; }
 
 .standing-row {
+  position: relative;
   display: grid;
   grid-template-columns: 28px 1fr 60px;
   gap: 0 12px;
   align-items: center;
   padding: 14px 16px;
   border-bottom: 1px solid var(--line);
+  border-left: 3px solid transparent;
   cursor: pointer;
   transition: background 0.12s ease;
   -webkit-tap-highlight-color: transparent;
+  overflow: hidden;
 }
 .standing-row:last-child { border-bottom: none; }
 .standing-row:active { background: var(--card); }
@@ -271,11 +285,22 @@ body {
 .standing-row.leader { background: var(--green-bg); }
 .standing-row.leader:active { background: rgba(74,222,128,0.12); }
 
+/* Progress bar at bottom of standing row */
+.row-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  opacity: 0.18;
+  pointer-events: none;
+  border-radius: 0 2px 2px 0;
+}
+
 /* Rank number */
 .row-rank {
   font-size: 13px;
   font-weight: 700;
-  color: var(--t3);
+  color: var(--t2);
   text-align: center;
   line-height: 1;
 }
@@ -287,7 +312,7 @@ body {
 /* Player name + team preview */
 .row-info { min-width: 0; }
 .row-name {
-  font-size: 19px;
+  font-size: 20px;
   font-weight: 800;
   letter-spacing: -0.03em;
   line-height: 1.05;
@@ -297,7 +322,7 @@ body {
   margin-top: 4px;
   font-size: 11px;
   font-weight: 500;
-  color: var(--t3);
+  color: var(--t2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -308,10 +333,9 @@ body {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 0;
 }
 .row-pts {
-  font-size: 26px;
+  font-size: 28px;
   font-weight: 800;
   letter-spacing: -0.04em;
   font-variant-numeric: tabular-nums;
@@ -319,18 +343,10 @@ body {
   line-height: 1;
 }
 .leader .row-pts { color: var(--green); }
-.row-pts-unit {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--t3);
-  margin-top: 2px;
-}
 
 /* Expanded team breakdown */
 .standing-expand {
-  background: var(--card);
+  background: var(--card-2);
   border-bottom: 1px solid var(--line);
   overflow: hidden;
 }
@@ -347,11 +363,13 @@ body {
 .expand-team:last-child { border-bottom: none; }
 .et-name { font-size: 14px; font-weight: 600; color: var(--t1); }
 .et-right { display: flex; align-items: center; gap: 12px; }
-.et-record { font-size: 12px; color: var(--t2); font-weight: 500; }
 .et-pts {
-  font-size: 16px; font-weight: 700;
+  font-size: 16px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
-  color: var(--t1); min-width: 24px; text-align: right;
+  color: var(--t1);
+  min-width: 24px;
+  text-align: right;
 }
 .et-pts.zero { color: var(--t3); }
 

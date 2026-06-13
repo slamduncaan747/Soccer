@@ -5,6 +5,12 @@ import type { ProjectionResult, PlayerProjection, FixtureProjection } from "@/li
 
 type Tab = "matches" | "table";
 
+const PLAYER_COLORS: Record<string, string> = {
+  Sam: "#60a5fa", Wyatt: "#f59e0b", Duncan: "#a78bfa",
+  Conrad: "#f472b6", Gus: "#34d399", Isiah: "#fb923c",
+};
+const playerColor = (name: string) => PLAYER_COLORS[name] ?? "#888";
+
 const FLAGS: Record<string, string> = {
   "Spain": "🇪🇸", "France": "🇫🇷", "Brazil": "🇧🇷", "Argentina": "🇦🇷",
   "England": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "Germany": "🇩🇪", "Portugal": "🇵🇹", "Netherlands": "🇳🇱",
@@ -40,15 +46,12 @@ export default function Page() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Standings sorted by current points (for the header callout)
   const leader = useMemo(() => {
     if (!data) return null;
     return [...data.players].sort(
       (a, b) => b.currentPoints - a.currentPoints || b.expectedFinalPoints - a.expectedFinalPoints
     )[0];
   }, [data]);
-
-  const isLive = data?.status.liveResults ?? false;
 
   return (
     <>
@@ -127,11 +130,11 @@ function MatchesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
         <div className="day-section" key={key}>
           <div className={`day-label ${isToday ? "today-label" : ""}`}>
             {isToday && <span className="today-pip" />}
-            {label}
+            {isToday ? "TODAY" : label}
           </div>
           <div className="day-card">
             {matches.map((f) => (
-              <MatchRow key={f.id} fixture={f} />
+              <MatchRow key={f.id} fixture={f} isToday={isToday} />
             ))}
           </div>
         </div>
@@ -140,7 +143,7 @@ function MatchesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
   );
 }
 
-function MatchRow({ fixture: f }: { fixture: FixtureProjection }) {
+function MatchRow({ fixture: f, isToday }: { fixture: FixtureProjection; isToday: boolean }) {
   const d = f.kickoff ? new Date(f.kickoff) : null;
   const timeStr = d
     ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
@@ -150,7 +153,7 @@ function MatchRow({ fixture: f }: { fixture: FixtureProjection }) {
   const period = timeParts[1] ?? "";
 
   return (
-    <div className="match-row">
+    <div className={`match-row${isToday ? " today" : ""}`}>
       <div className="match-time-col">
         <span className="time-val">{timeVal}</span>
         {period && <span className="time-period">{period}</span>}
@@ -161,14 +164,18 @@ function MatchRow({ fixture: f }: { fixture: FixtureProjection }) {
             <span className="team-flag">{flag(f.home)}</span>
             <span className="team-name">{f.home}</span>
           </div>
-          <span className="owner-name">{f.homeOwner}</span>
+          <span className="owner-name" style={{ color: playerColor(f.homeOwner) }}>
+            {f.homeOwner}
+          </span>
         </div>
         <div className="team-line">
           <div className="team-line-left">
             <span className="team-flag">{flag(f.away)}</span>
             <span className="team-name">{f.away}</span>
           </div>
-          <span className="owner-name">{f.awayOwner}</span>
+          <span className="owner-name" style={{ color: playerColor(f.awayOwner) }}>
+            {f.awayOwner}
+          </span>
         </div>
       </div>
     </div>
@@ -191,6 +198,8 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
     [players]
   );
 
+  const maxPts = Math.max(...sorted.map((p) => p.currentPoints), 1);
+
   return (
     <div className="standings-wrap">
       <div className="standings-col-heads">
@@ -205,12 +214,15 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
           .slice(0, 3)
           .map((t) => t.team)
           .join(" · ");
+        const color = i === 0 ? "var(--green)" : playerColor(p.player);
+        const progressPct = (p.currentPoints / maxPts) * 100;
 
         return (
           <div key={p.player}>
             <div
               className={`standing-row ${i === 0 ? "leader" : ""}`}
               onClick={() => setOpen(isOpen ? null : p.player)}
+              style={{ borderLeftColor: color }}
             >
               <span className="row-rank">{i + 1}</span>
               <div className="row-info">
@@ -219,8 +231,14 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
               </div>
               <div className="row-pts-wrap">
                 <span className="row-pts">{p.currentPoints}</span>
-                <span className="row-pts-unit">pts</span>
               </div>
+              <div
+                className="row-progress"
+                style={{
+                  width: `${progressPct}%`,
+                  backgroundColor: color,
+                }}
+              />
             </div>
 
             {isOpen && <PlayerExpand player={p} />}
@@ -233,16 +251,18 @@ function TableTab({ players }: { players: PlayerProjection[] }) {
 
 function PlayerExpand({ player: p }: { player: PlayerProjection }) {
   const sorted = [...p.teams].sort((a, b) => b.currentPoints - a.currentPoints);
+  const color = playerColor(p.player);
   return (
     <div className="standing-expand">
       <div className="expand-teams">
         {sorted.map((t) => (
           <div className="expand-team" key={t.team}>
-            <span className="et-name">{flag(t.team)} {t.team}</span>
+            <span className="et-name" style={{ color }}>
+              {flag(t.team)} {t.team}
+            </span>
             <div className="et-right">
-              <span className="et-record">{t.currentPoints / 3}W</span>
               <span className={`et-pts ${t.currentPoints === 0 ? "zero" : ""}`}>
-                {t.currentPoints}
+                {t.currentPoints} pts
               </span>
             </div>
           </div>
@@ -253,7 +273,7 @@ function PlayerExpand({ player: p }: { player: PlayerProjection }) {
 }
 
 /* ============================================================
-   SVG ICONS — clean, consistent, no emoji
+   SVG ICONS
    ============================================================ */
 function CalendarIcon() {
   return (
@@ -306,7 +326,7 @@ function groupByDay(fixtures: FixtureProjection[]): DayGroup[] {
     const isToday = d ? sameDay(d, now) : false;
     const label = d
       ? isToday
-        ? "Today"
+        ? "TODAY"
         : d.toLocaleDateString("en-US", {
             weekday: "short", month: "short", day: "numeric",
           }).toUpperCase()
