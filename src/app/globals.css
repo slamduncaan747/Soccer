@@ -241,8 +241,8 @@ body {
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  color: var(--t2);
   flex-shrink: 0;
-  /* color is set via inline style per player */
 }
 
 /* ──────────────────────────────────────
@@ -272,7 +272,7 @@ body {
   align-items: center;
   padding: 14px 16px;
   border-bottom: 1px solid var(--line);
-  border-left: 3px solid transparent;
+  border-left: 2px solid transparent;
   cursor: pointer;
   transition: background 0.12s ease;
   -webkit-tap-highlight-color: transparent;
@@ -290,8 +290,8 @@ body {
   position: absolute;
   bottom: 0;
   left: 0;
-  height: 3px;
-  opacity: 0.18;
+  height: 2px;
+  opacity: 0.12;
   pointer-events: none;
   border-radius: 0 2px 2px 0;
 }

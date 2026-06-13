@@ -164,18 +164,14 @@ function MatchRow({ fixture: f, isToday }: { fixture: FixtureProjection; isToday
             <span className="team-flag">{flag(f.home)}</span>
             <span className="team-name">{f.home}</span>
           </div>
-          <span className="owner-name" style={{ color: playerColor(f.homeOwner) }}>
-            {f.homeOwner}
-          </span>
+          <span className="owner-name">{f.homeOwner}</span>
         </div>
         <div className="team-line">
           <div className="team-line-left">
             <span className="team-flag">{flag(f.away)}</span>
             <span className="team-name">{f.away}</span>
           </div>
-          <span className="owner-name" style={{ color: playerColor(f.awayOwner) }}>
-            {f.awayOwner}
-          </span>
+          <span className="owner-name">{f.awayOwner}</span>
         </div>
       </div>
     </div>
