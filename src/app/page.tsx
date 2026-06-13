@@ -6,12 +6,12 @@ import type { ProjectionResult, PlayerProjection, FixtureProjection } from "@/li
 const FINISH_LABELS = ["1st", "2nd", "3rd", "4th", "5th", "6th"];
 
 export default function Page() {
-  const [data, setData] = useState<ProjectionResult | null>(null);
+  const [data, setData]       = useState<ProjectionResult | null>(null);
   const [loading, setLoading] = useState(true);
-  const [mock, setMock] = useState(false);
+  const [mock, setMock]       = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [navScrolled, setNavScrolled] = useState(false);
-  const [activeSection, setActiveSection] = useState("matches");
+  const [scrolled, setScrolled] = useState(false);
+  const [activeSection, setActiveSection] = useState<string>("standings");
 
   const load = useCallback(async (useMock: boolean) => {
     setLoading(true);
@@ -32,260 +32,178 @@ export default function Page() {
 
   useEffect(() => { load(mock); }, [load, mock]);
 
-  // Nav scroll shadow
+  // Header border on scroll
   useEffect(() => {
-    const onScroll = () => setNavScrolled(window.scrollY > 4);
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    const fn = () => setScrolled(window.scrollY > 2);
+    window.addEventListener("scroll", fn, { passive: true });
+    return () => window.removeEventListener("scroll", fn);
   }, []);
 
-  // IntersectionObserver for active nav link
+  // Section highlight in nav
   useEffect(() => {
-    const sections = ["matches", "standings", "schedule"];
-    const observers: IntersectionObserver[] = [];
-    sections.forEach((id) => {
+    const ids = ["standings", "today", "schedule"];
+    const obs = ids.map((id) => {
       const el = document.getElementById(id);
-      if (!el) return;
-      const obs = new IntersectionObserver(
-        ([entry]) => { if (entry.isIntersecting) setActiveSection(id); },
-        { rootMargin: "-40% 0px -55% 0px" }
+      if (!el) return null;
+      const o = new IntersectionObserver(
+        ([e]) => { if (e.isIntersecting) setActiveSection(id); },
+        { rootMargin: "-30% 0px -60% 0px" }
       );
-      obs.observe(el);
-      observers.push(obs);
+      o.observe(el);
+      return o;
     });
-    return () => observers.forEach((o) => o.disconnect());
+    return () => obs.forEach((o) => o?.disconnect());
   }, [data]);
 
   const today = useMemo(() => {
     if (!data) return [];
     const now = new Date();
-    return data.fixtures.filter((f) => f.kickoff && sameDay(new Date(f.kickoff), now));
+    return [...data.fixtures]
+      .filter((f) => f.kickoff && sameDay(new Date(f.kickoff), now))
+      .sort((a, b) => b.swing - a.swing); // most impactful first
   }, [data]);
 
   const upcoming = useMemo(() => {
     if (!data) return [];
     const now = new Date();
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(0, 0, 0, 0);
+    const eod = new Date(now); eod.setHours(23, 59, 59, 999);
     return [...data.fixtures]
-      .filter((f) => f.kickoff && new Date(f.kickoff).getTime() >= tomorrow.getTime())
-      .sort((a, b) => kickoffMs(a) - kickoffMs(b))
-      .slice(0, 30);
+      .filter((f) => f.kickoff && new Date(f.kickoff).getTime() > eod.getTime())
+      .sort((a, b) => new Date(a.kickoff!).getTime() - new Date(b.kickoff!).getTime())
+      .slice(0, 32);
   }, [data]);
 
-  const todayDate = useMemo(() => {
-    const now = new Date();
-    return now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }).toUpperCase();
-  }, []);
+  const isLive = data
+    ? data.status.groupSource === "kalshi" || data.status.knockoutSource === "kalshi"
+    : false;
 
-  const isLive = data?.status.groupSource === "kalshi" || data?.status.knockoutSource === "kalshi";
+  const todayStr = new Date().toLocaleDateString("en-US", {
+    weekday: "long", month: "long", day: "numeric",
+  });
+
+  const heroTitle = today.length > 0
+    ? `${today.length} match${today.length === 1 ? "" : "es"} today`
+    : "Standings";
 
   return (
     <>
-      {/* Sticky nav */}
-      <nav className={`site-nav ${navScrolled ? "scrolled" : ""}`} aria-label="Page sections">
-        <span className="nav-brand">WC26 <span>Pool</span></span>
-        <ul className="nav-links" role="list">
-          {[
-            { id: "matches", label: "Matches" },
-            { id: "standings", label: "Standings" },
-            { id: "schedule", label: "Schedule" },
-          ].map(({ id, label }) => (
-            <li key={id}>
-              <a
-                href={`#${id}`}
-                className={activeSection === id ? "active" : ""}
-                onClick={(e) => {
-                  e.preventDefault();
-                  document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
-                }}
-              >
-                {label}
-              </a>
-            </li>
-          ))}
-        </ul>
-        <div className="nav-status" aria-live="polite">
-          <span className={`status-dot ${!data ? "" : isLive ? "live" : "mock"}`} />
-          <span>{!data ? "—" : isLive ? "Live" : "Model"}</span>
+      {/* ── Header ── */}
+      <header className={`site-header ${scrolled ? "border-on" : ""}`} role="banner">
+        <div className="header-inner">
+          <span className="header-brand">WC26 Pool</span>
+
+          <nav aria-label="Page sections">
+            <ul className="header-nav" role="list">
+              {[
+                { id: "standings", label: "Standings" },
+                { id: "today",     label: "Today" },
+                { id: "schedule",  label: "Schedule" },
+              ].map(({ id, label }) => (
+                <li key={id}>
+                  <a
+                    href={`#${id}`}
+                    className={activeSection === id ? "active" : ""}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+                    }}
+                  >
+                    {label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+
+          <div className="header-status" aria-live="polite">
+            <span className={`live-dot ${!loading && isLive ? "on" : ""}`} />
+            <span className={`live-label ${!loading && isLive ? "on" : ""}`}>
+              {loading ? "Loading" : isLive ? "Live" : "Model"}
+            </span>
+          </div>
         </div>
-      </nav>
+      </header>
 
+      {/* ── Main ── */}
       <main className="page">
-        {/* Matchday header */}
-        <header className="matchday-header">
-          <p className="matchday-eyebrow">World Cup 2026 · Draft Pool</p>
-          <h1 className="matchday-title">
-            {today.length > 0 ? (
-              <><em>{today.length} {today.length === 1 ? "match" : "matches"}</em><br />today</>
-            ) : (
-              <>Group<br /><em>Stage</em></>
+        <div className="container">
+
+          {/* Hero */}
+          <div className="page-hero">
+            <p className="hero-date">{todayStr}</p>
+            <h1 className="hero-title">{heroTitle}</h1>
+            {data && (
+              <div className="hero-stats">
+                <span className="hero-stat">{data.players.length} players</span>
+                <span className="hero-stat">{(data.iterations / 1000).toFixed(0)}k simulations</span>
+                <span className="hero-stat">
+                  {data.status.groupSource === "kalshi" ? "Kalshi odds" : "Model odds"}
+                </span>
+              </div>
             )}
-          </h1>
-          <div className="matchday-meta">
-            <span>{todayDate}</span>
-            {data && <span>{data.players.length} players · {data.players.reduce((s, p) => s + p.teams.length, 0)} teams</span>}
-            {data && <span>{(data.iterations / 1000).toFixed(0)}k simulations</span>}
           </div>
-        </header>
 
-        {loading && (
-          <div className="loading-state">Running simulations…</div>
-        )}
-
-        {!loading && !data && (
-          <div className="error-state">
-            Couldn&apos;t load projections.{" "}
-            <button className="ctrl-btn" style={{ display: "inline", padding: "4px 10px" }} onClick={() => load(mock)}>
-              Retry
-            </button>
-          </div>
-        )}
-
-        {!loading && data && (
-          <>
-            {/* TODAY'S MATCHES */}
-            <section id="matches" className="section">
-              <div className="section-header">
-                <h2 className="section-title">Today&apos;s matches</h2>
-                {today.length > 0 && (
-                  <span className="section-meta">{today.length} {today.length === 1 ? "fixture" : "fixtures"}</span>
-                )}
-              </div>
-
-              {today.length === 0 ? (
-                <div className="no-matches">No pool matches today — check the schedule below.</div>
-              ) : (
-                <div className="match-list">
-                  {today.map((f, i) => (
-                    <MatchCard key={f.id} fixture={f} mounted={mounted} delay={i * 60} />
-                  ))}
-                </div>
-              )}
-            </section>
-
-            {/* STANDINGS */}
-            <section id="standings" className="section">
-              <div className="section-header">
-                <h2 className="section-title">Standings</h2>
-                <span className="section-meta">Win probability</span>
-              </div>
-              <StandingsTable players={data.players} mounted={mounted} />
-            </section>
-
-            {/* SCHEDULE */}
-            <section id="schedule" className="section">
-              <div className="section-header">
-                <h2 className="section-title">Schedule</h2>
-                {upcoming.length > 0 && (
-                  <span className="section-meta">Next {upcoming.length} fixtures</span>
-                )}
-              </div>
-              {upcoming.length === 0 ? (
-                <div className="no-matches">No upcoming fixtures.</div>
-              ) : (
-                <UpcomingStrip fixtures={upcoming} mounted={mounted} />
-              )}
-            </section>
-
-            <div className="controls">
-              <button className="ctrl-btn" onClick={() => load(mock)} disabled={loading}>
-                ↻ Re-run simulation
-              </button>
-              <button className="ctrl-btn" onClick={() => setMock((m) => !m)} disabled={loading}>
-                {mock ? "Switch to live odds" : "Switch to model odds"}
+          {/* ── Loading / Error ── */}
+          {loading && <div className="state-center">Running simulations…</div>}
+          {!loading && !data && (
+            <div className="state-center">
+              Failed to load.{" "}
+              <button className="ctrl-btn" style={{ marginLeft: 12, flex: "none" }} onClick={() => load(mock)}>
+                Retry
               </button>
             </div>
+          )}
 
-            <p className="page-note">
-              Win&nbsp;% is each player&apos;s probability of finishing 1st, from a
-              Monte Carlo simulation of all remaining matches. Group odds via Kalshi
-              3-way markets; knockout odds from Kalshi advance markets.
-              Set <code>FOOTBALL_DATA_TOKEN</code> for live results.
-            </p>
-          </>
-        )}
+          {!loading && data && (
+            <>
+              {/* ── STANDINGS ── */}
+              <section id="standings" className="section">
+                <p className="section-label">Standings</p>
+                <StandingsTable players={data.players} mounted={mounted} />
+              </section>
+
+              {/* ── TODAY'S MATCHES ── */}
+              <section id="today" className="section">
+                <p className="section-label">
+                  {today.length > 0 ? `Today · ${today.length} fixture${today.length === 1 ? "" : "s"}` : "Today"}
+                </p>
+                {today.length === 0 ? (
+                  <p className="empty">No pool matches today.</p>
+                ) : (
+                  <div className="match-list">
+                    {today.map((f, i) => (
+                      <MatchCard key={f.id} fixture={f} mounted={mounted} delay={i * 40} />
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              {/* ── SCHEDULE ── */}
+              <section id="schedule" className="section">
+                <p className="section-label">
+                  {upcoming.length > 0 ? `Schedule · ${upcoming.length} upcoming` : "Schedule"}
+                </p>
+                {upcoming.length === 0 ? (
+                  <p className="empty">No upcoming fixtures.</p>
+                ) : (
+                  <ScheduleList fixtures={upcoming} mounted={mounted} />
+                )}
+              </section>
+
+              {/* ── Controls ── */}
+              <div className="controls">
+                <button className="ctrl-btn" onClick={() => load(mock)} disabled={loading}>
+                  Refresh
+                </button>
+                <button className="ctrl-btn" onClick={() => setMock((m) => !m)} disabled={loading}>
+                  {mock ? "Use live odds" : "Use model odds"}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </main>
     </>
-  );
-}
-
-/* ============================================================
-   MATCH CARD
-   ============================================================ */
-function MatchCard({
-  fixture: f, mounted, delay,
-}: { fixture: FixtureProjection; mounted: boolean; delay: number }) {
-  const o = f.oddsHome;
-  const isKey = f.swing >= 0.05;
-
-  const time = f.kickoff
-    ? new Date(f.kickoff).toLocaleString("en-US", {
-        weekday: "short", hour: "numeric", minute: "2-digit",
-      })
-    : "TBD";
-
-  const stakesLine = f.swing > 0 && f.swingPlayer
-    ? (() => {
-        const toward = f.swingToward === "home" ? f.home : f.away;
-        return `A ${toward} win shifts ${f.swingPlayer}'s title odds by ${(f.swing * 100).toFixed(1)}pp`;
-      })()
-    : null;
-
-  return (
-    <div
-      className={`match-card ${isKey ? "key-game" : ""}`}
-      style={{ animationDelay: `${delay}ms` }}
-    >
-      <div className="match-meta-row">
-        <span className="match-time">{time}</span>
-        {isKey && (
-          <span className="match-swing">↑ {(f.swing * 100).toFixed(0)}% swing</span>
-        )}
-      </div>
-
-      <div className="match-teams-row">
-        <div className="match-team">
-          <span className="team-name">{f.home}</span>
-          <span className="team-owner">{f.homeOwner}</span>
-        </div>
-        <span className="match-vs">vs</span>
-        <div className="match-team away">
-          <span className="team-name">{f.away}</span>
-          <span className="team-owner">{f.awayOwner}</span>
-        </div>
-      </div>
-
-      {o ? (
-        <div className="odds-grid">
-          <OddsLeg label={f.home} pct={o.win} mounted={mounted} side="home" />
-          <OddsLeg label="Draw" pct={o.draw} mounted={mounted} side="draw" />
-          <OddsLeg label={f.away} pct={o.loss} mounted={mounted} side="away" />
-        </div>
-      ) : null}
-
-      {stakesLine && <div className="match-stakes">{stakesLine}</div>}
-    </div>
-  );
-}
-
-function OddsLeg({
-  label, pct, mounted, side,
-}: { label: string; pct: number; mounted: boolean; side: string }) {
-  return (
-    <div className={`odds-leg ${side}`}>
-      <div className="odds-bar-track">
-        <div
-          className="odds-bar-fill"
-          style={{ width: mounted ? `${pct * 100}%` : "0%" }}
-        />
-      </div>
-      <div className="odds-row">
-        <span className="odds-label">{label}</span>
-        <span className="odds-pct">{(pct * 100).toFixed(0)}%</span>
-      </div>
-    </div>
   );
 }
 
@@ -294,155 +212,226 @@ function OddsLeg({
    ============================================================ */
 function StandingsTable({ players, mounted }: { players: PlayerProjection[]; mounted: boolean }) {
   const [open, setOpen] = useState<string | null>(null);
-  const maxFirst = players[0]?.pFirst || 1;
+  const maxFirst = players[0]?.pFirst ?? 1;
 
   return (
-    <table className="standings-table">
+    <table className="standings">
       <thead>
         <tr>
           <th aria-label="Rank">#</th>
           <th>Player</th>
-          <th>Now</th>
+          <th>Pts</th>
           <th>Proj</th>
-          <th>Win%</th>
-          <th>Top&nbsp;3</th>
+          <th>Win prob</th>
+          <th>Top 3</th>
         </tr>
       </thead>
       <tbody>
-        {players.map((p, i) => (
-          <>
-            <tr
-              key={p.player}
-              className={`standings-row ${i === 0 ? "leader" : ""}`}
-              onClick={() => setOpen(open === p.player ? null : p.player)}
-              aria-expanded={open === p.player}
-            >
-              <td className="s-rank">{i + 1}</td>
-              <td className="s-name">{p.player}</td>
-              <td className="s-num now">{p.currentPoints}</td>
-              <td className="s-num proj">{p.expectedFinalPoints.toFixed(1)}</td>
-              <td className="s-win-cell">
-                <div
-                  className="s-win-bar"
-                  style={{ width: mounted ? `${(p.pFirst / maxFirst) * 100}%` : "0%" }}
-                />
-                <span className="s-win-val">{(p.pFirst * 100).toFixed(1)}%</span>
-              </td>
-              <td className="s-top3">{(p.pTop3 * 100).toFixed(0)}%</td>
-            </tr>
-            {open === p.player && (
-              <tr key={`${p.player}-detail`}>
-                <td colSpan={6} style={{ padding: 0 }}>
-                  <PlayerDetail player={p} mounted={mounted} />
+        {players.map((p, i) => {
+          const isOpen = open === p.player;
+          return (
+            <>
+              <tr
+                key={p.player}
+                className={i === 0 ? "leader" : ""}
+                onClick={() => setOpen(isOpen ? null : p.player)}
+                aria-expanded={isOpen}
+              >
+                <td className="s-rank">{i + 1}</td>
+                <td className="s-player">{p.player}</td>
+                <td className="s-num prominent">{p.currentPoints}</td>
+                <td className="s-num">{p.expectedFinalPoints.toFixed(1)}</td>
+                <td className="s-prob-cell">
+                  <div className="s-prob-inner">
+                    <span className="s-prob-num">{(p.pFirst * 100).toFixed(1)}%</span>
+                    <div className="s-prob-bar-track">
+                      <div
+                        className="s-prob-bar-fill"
+                        style={{ width: mounted ? `${(p.pFirst / maxFirst) * 100}%` : "0%" }}
+                      />
+                    </div>
+                  </div>
                 </td>
+                <td className="s-top3">{(p.pTop3 * 100).toFixed(0)}%</td>
               </tr>
-            )}
-          </>
-        ))}
+              {isOpen && (
+                <tr key={`${p.player}-expand`} className="player-expand-row">
+                  <td colSpan={6}>
+                    <PlayerExpand player={p} mounted={mounted} />
+                  </td>
+                </tr>
+              )}
+            </>
+          );
+        })}
       </tbody>
     </table>
   );
 }
 
-function PlayerDetail({ player: p, mounted }: { player: PlayerProjection; mounted: boolean }) {
+function PlayerExpand({ player: p, mounted }: { player: PlayerProjection; mounted: boolean }) {
   const maxDist = Math.max(...p.finishDistribution, 0.001);
   return (
-    <div className="player-detail">
-      <div className="player-detail-inner">
-        {/* Team breakdown */}
-        <div className="detail-teams">
-          {p.teams.map((t) => (
-            <div className="detail-team-row" key={t.team}>
-              <span className="dt-name">{t.team}</span>
-              <span className="dt-pts">{t.currentPoints} pts</span>
-              <span className="dt-proj">{t.expectedFinalPoints.toFixed(1)} proj</span>
-            </div>
-          ))}
-        </div>
-
-        {/* Finish distribution */}
-        <div className="detail-dist">
-          <p className="detail-dist-label">Finish odds</p>
-          <div className="dist-bars">
-            {p.finishDistribution.slice(0, 6).map((d, i) => (
-              <div
-                key={i}
-                className={`dist-bar ${i === 0 ? "first" : ""}`}
-                style={{ height: mounted ? `${Math.max(4, (d / maxDist) * 100)}%` : "4%" }}
-                title={`${FINISH_LABELS[i]}: ${(d * 100).toFixed(1)}%`}
-              >
-                <span className="dist-bar-label">{FINISH_LABELS[i]}</span>
-              </div>
-            ))}
+    <div className="player-expand">
+      <div className="expand-teams">
+        {p.teams.map((t) => (
+          <div className="expand-team-row" key={t.team}>
+            <span className="et-name">{t.team}</span>
+            <span className="et-now">{t.currentPoints} pts</span>
+            <span className="et-proj">{t.expectedFinalPoints.toFixed(1)}</span>
           </div>
-        </div>
+        ))}
+      </div>
+      <p className="expand-dist-label">Finish probability</p>
+      <div className="expand-dist-bars">
+        {p.finishDistribution.slice(0, 6).map((d, i) => (
+          <div
+            key={i}
+            className={`dist-bar ${i === 0 ? "first" : ""}`}
+            style={{ height: mounted ? `${Math.max(4, (d / maxDist) * 100)}%` : "4%" }}
+            title={`${FINISH_LABELS[i]}: ${(d * 100).toFixed(1)}%`}
+          >
+            <span className="dist-bar-lbl">{FINISH_LABELS[i]}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
 /* ============================================================
-   UPCOMING STRIP
+   MATCH CARD
    ============================================================ */
-function UpcomingStrip({ fixtures, mounted }: { fixtures: FixtureProjection[]; mounted: boolean }) {
+function MatchCard({ fixture: f, mounted, delay }: {
+  fixture: FixtureProjection; mounted: boolean; delay: number;
+}) {
+  const o = f.oddsHome;
+  const isKey = f.swing >= 0.05;
+
+  const time = f.kickoff
+    ? new Date(f.kickoff).toLocaleString("en-US", { hour: "numeric", minute: "2-digit" })
+    : "TBD";
+
+  const stakes = buildStakes(f);
+
+  return (
+    <div
+      className={`match-card${isKey ? " key" : ""}`}
+      style={{ animationDelay: `${delay}ms` }}
+    >
+      <div className="match-top-row">
+        <span className="match-time">{time}</span>
+        {isKey && (
+          <span className="match-impact">
+            {(f.swing * 100).toFixed(0)}pp swing
+          </span>
+        )}
+      </div>
+
+      <div className="match-teams">
+        <div className="match-side">
+          <span className="match-team-name">{f.home}</span>
+          <span className="match-owner">{f.homeOwner}</span>
+        </div>
+        <span className="match-vs-sep">vs</span>
+        <div className="match-side right">
+          <span className="match-team-name">{f.away}</span>
+          <span className="match-owner">{f.awayOwner}</span>
+        </div>
+      </div>
+
+      {o && (
+        <div className="odds-row">
+          <OddsCol
+            label={`${f.home} win`}
+            pct={o.win}
+            mounted={mounted}
+            align="left"
+          />
+          <OddsCol
+            label="Draw"
+            pct={o.draw}
+            mounted={mounted}
+            align="center"
+          />
+          <OddsCol
+            label={`${f.away} win`}
+            pct={o.loss}
+            mounted={mounted}
+            align="right"
+          />
+        </div>
+      )}
+
+      {stakes && <p className="match-stakes">{stakes}</p>}
+    </div>
+  );
+}
+
+function OddsCol({ label, pct, mounted, align }: {
+  label: string; pct: number; mounted: boolean; align: "left" | "center" | "right";
+}) {
+  return (
+    <div className={`odds-col ${align === "center" ? "center" : align === "right" ? "right" : ""}`}>
+      <span className="odds-pct">{(pct * 100).toFixed(0)}%</span>
+      <div className="odds-bar">
+        <div className="odds-fill" style={{ width: mounted ? `${pct * 100}%` : "0%" }} />
+      </div>
+      <span className="odds-outcome">{label}</span>
+    </div>
+  );
+}
+
+/* ============================================================
+   SCHEDULE LIST
+   ============================================================ */
+function ScheduleList({ fixtures, mounted }: { fixtures: FixtureProjection[]; mounted: boolean }) {
   const [open, setOpen] = useState<string | null>(null);
 
   return (
-    <div className="upcoming-list">
+    <div className="schedule-list">
       {fixtures.map((f) => {
         const isOpen = open === f.id;
-        const dateLabel = f.kickoff
-          ? new Date(f.kickoff).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).toUpperCase()
+        const date = f.kickoff
+          ? new Date(f.kickoff).toLocaleDateString("en-US", {
+              weekday: "short", month: "short", day: "numeric",
+            })
           : "TBD";
-        const timeLabel = f.kickoff
-          ? new Date(f.kickoff).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+        const time = f.kickoff
+          ? new Date(f.kickoff).toLocaleTimeString("en-US", {
+              hour: "numeric", minute: "2-digit",
+            })
           : "";
         const o = f.oddsHome;
-
         return (
           <div key={f.id}>
             <div
-              className="upcoming-row"
+              className="sched-row"
               onClick={() => setOpen(isOpen ? null : f.id)}
               aria-expanded={isOpen}
             >
-              <span className="up-date">{dateLabel}</span>
-              <span className="up-teams">{f.home} <span style={{ color: "var(--muted-2)" }}>v</span> {f.away}</span>
+              <span className="sched-date">{date}</span>
+              <span className="sched-teams">
+                {f.home}
+                <span className="sep">v</span>
+                {f.away}
+              </span>
               {o ? (
-                <span className="up-odds">
-                  {(o.win * 100).toFixed(0)}% · {(o.draw * 100).toFixed(0)}% · {(o.loss * 100).toFixed(0)}%
+                <span className="sched-odds">
+                  {(o.win * 100).toFixed(0)}
+                  <span style={{ margin: "0 3px", color: "var(--text-3)" }}>·</span>
+                  {(o.draw * 100).toFixed(0)}
+                  <span style={{ margin: "0 3px", color: "var(--text-3)" }}>·</span>
+                  {(o.loss * 100).toFixed(0)}
                 </span>
               ) : (
-                <span className="up-odds" style={{ color: "var(--muted-2)" }}>—</span>
+                <span className="sched-odds">—</span>
               )}
             </div>
-
             {isOpen && (
-              <div className="up-expand">
-                <div className="up-expand-inner">
-                  <div className="up-exp-teams">
-                    <div className="up-exp-team">
-                      <span className="up-exp-name">{f.home}</span>
-                      <span className="team-owner">{f.homeOwner}</span>
-                    </div>
-                    <span className="match-vs" style={{ paddingTop: 4 }}>{timeLabel || "vs"}</span>
-                    <div className="up-exp-team right">
-                      <span className="up-exp-name">{f.away}</span>
-                      <span className="team-owner">{f.awayOwner}</span>
-                    </div>
-                  </div>
-                  {o && (
-                    <div className="odds-grid">
-                      <OddsLeg label={f.home} pct={o.win} mounted={mounted} side="home" />
-                      <OddsLeg label="Draw" pct={o.draw} mounted={mounted} side="draw" />
-                      <OddsLeg label={f.away} pct={o.loss} mounted={mounted} side="away" />
-                    </div>
-                  )}
-                  {f.swing > 0.02 && f.swingPlayer && (
-                    <div className="match-stakes" style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
-                      {`A ${f.swingToward === "home" ? f.home : f.away} win shifts ${f.swingPlayer}'s title odds by ${(f.swing * 100).toFixed(1)}pp`}
-                    </div>
-                  )}
+              <div className="sched-expand">
+                <div className="sched-expand-inner">
+                  <MatchCard fixture={f} mounted={mounted} delay={0} />
                 </div>
               </div>
             )}
@@ -456,14 +445,17 @@ function UpcomingStrip({ fixtures, mounted }: { fixtures: FixtureProjection[]; m
 /* ============================================================
    HELPERS
    ============================================================ */
+function buildStakes(f: FixtureProjection): string | null {
+  if (f.swing <= 0 || !f.swingPlayer) return null;
+  const team = f.swingToward === "home" ? f.home : f.away;
+  const pp = (f.swing * 100).toFixed(1);
+  return `${team} win moves ${f.swingPlayer}'s title probability by ${pp}pp`;
+}
+
 function sameDay(a: Date, b: Date): boolean {
   return (
     a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate()
   );
-}
-
-function kickoffMs(f: FixtureProjection): number {
-  return f.kickoff ? new Date(f.kickoff).getTime() : Number.MAX_SAFE_INTEGER;
 }
