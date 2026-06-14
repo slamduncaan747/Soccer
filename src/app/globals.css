@@ -588,3 +588,166 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ──────────────────────────────────────
+   INSIGHTS — interactive title race
+────────────────────────────────────── */
+.insight-note { font-size: 11px; color: var(--t2); margin: -6px 0 14px; line-height: 1.4; }
+.insight-note.small { margin: 12px 0 0; font-size: 10px; color: var(--t3); }
+
+.win-row.tappable {
+  display: block; width: 100%; text-align: left;
+  background: none; border: none; cursor: pointer;
+  padding: 10px; margin: 0 -10px 4px; border-radius: 10px;
+  font-family: inherit; transition: background 0.15s ease;
+}
+.win-row.tappable:active { background: var(--card-2); }
+.win-row.tappable.selected { background: var(--card-2); }
+.win-name { display: flex; align-items: baseline; gap: 7px; }
+.win-rank { font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.win-pct { display: inline-flex; align-items: baseline; gap: 4px; }
+.win-se { font-size: 10px; font-weight: 600; color: var(--t2); letter-spacing: 0; }
+
+/* Why panel */
+.why-panel {
+  background: var(--card-2);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  padding: 14px;
+  margin: 2px 0 12px;
+  animation: tabFade 0.18s ease;
+}
+.why-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+  padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--line);
+}
+.why-stat { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.why-val { font-size: 17px; font-weight: 800; color: var(--t1); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.why-val-sub { font-size: 11px; font-weight: 600; color: var(--t2); }
+.why-lab { font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--t2); }
+
+.why-engine-head {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--t2); margin-bottom: 8px;
+}
+.why-engine { display: flex; flex-direction: column; gap: 7px; margin-bottom: 14px; }
+.engine-team { display: grid; grid-template-columns: 18px 84px 1fr 32px; align-items: center; gap: 8px; }
+.engine-team.dead { opacity: 0.4; }
+.engine-flag { font-size: 15px; }
+.engine-name { font-size: 12px; font-weight: 600; color: var(--t1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.engine-bar-track { height: 6px; background: var(--t3); border-radius: 3px; overflow: hidden; }
+.engine-bar { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
+.engine-pts { font-size: 12px; font-weight: 700; color: var(--t1); text-align: right; font-variant-numeric: tabular-nums; }
+
+.why-matches { display: flex; flex-direction: column; gap: 8px; }
+.why-match { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.why-match-teams { font-size: 12px; color: var(--t1); font-weight: 500; }
+.why-vs { color: var(--t3); font-size: 10px; font-weight: 700; }
+.why-match-delta { font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Projected gap chip */
+.proj-gap { font-weight: 700; color: var(--t2); margin-left: 2px; }
+.proj-gap-legend {
+  display: inline-block; font-size: 9px; font-weight: 800; color: var(--t2);
+  border: 1px solid var(--line-2); border-radius: 3px; padding: 0 3px;
+}
+
+/* Swing rows — confidence + dual stakes */
+.swing-val { margin-left: auto; font-size: 13px; font-weight: 800; color: var(--t1); font-variant-numeric: tabular-nums; display: inline-flex; align-items: baseline; gap: 4px; }
+.swing-pm { font-size: 10px; font-weight: 600; color: var(--t2); }
+.swing-noisy {
+  font-size: 8px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+  color: #f59e0b; background: rgba(245,158,11,0.12); padding: 1px 4px; border-radius: 3px; margin-left: 2px;
+}
+.swing-stakes { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.stake-side { font-size: 11px; color: var(--t2); font-weight: 500; }
+.stake-side.right { text-align: right; }
+.stake-side strong { font-weight: 800; }
+.swing-meta-time { font-size: 10px; color: var(--t3); font-weight: 500; }
+
+/* Methodology note */
+.method-note { margin-top: 4px; }
+.method-toggle {
+  display: flex; align-items: center; justify-content: space-between; width: 100%;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 13px 14px; cursor: pointer; font-family: inherit;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.03em; color: var(--t1);
+}
+.method-caret { font-size: 9px; color: var(--t2); }
+.method-body {
+  padding: 12px 14px 4px; animation: tabFade 0.18s ease;
+}
+.method-body p { font-size: 12px; line-height: 1.55; color: var(--t2); margin-bottom: 10px; }
+.method-body strong { color: var(--t1); font-weight: 700; }
+
+/* ──────────────────────────────────────
+   ODDS TAB — minimal title odds
+────────────────────────────────────── */
+.odds-wrap { padding: 4px 0 8px; }
+.odds-head { display: flex; align-items: baseline; justify-content: space-between; padding: 4px 4px 12px; }
+.odds-head-title { font-size: 13px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--t1); }
+.odds-head-sub { font-size: 10px; color: var(--t2); font-weight: 500; }
+.odds-row {
+  display: grid; grid-template-columns: 18px max-content 1fr auto; align-items: center; gap: 11px;
+  width: 100%; text-align: left; background: none; border: none; border-bottom: 1px solid var(--line);
+  padding: 13px 4px; cursor: pointer; font-family: inherit;
+}
+.odds-row.open { background: var(--card-2); }
+.odds-rank { font-size: 12px; font-weight: 800; color: var(--t2); font-variant-numeric: tabular-nums; text-align: center; }
+.odds-name { font-size: 15px; font-weight: 700; color: var(--t1); letter-spacing: -0.02em; white-space: nowrap; }
+.odds-bar-wrap { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.odds-bar-track { height: 5px; background: var(--t3); border-radius: 3px; overflow: hidden; }
+.odds-bar-fill { height: 100%; background: var(--t2); border-radius: 3px; transition: width 0.4s ease; }
+.odds-bar-fill.lead { background: var(--green); }
+.odds-sub { font-size: 10px; color: var(--t2); font-weight: 500; font-variant-numeric: tabular-nums; }
+.odds-pct { font-size: 22px; font-weight: 800; color: var(--t1); letter-spacing: -0.04em; font-variant-numeric: tabular-nums; display: flex; align-items: baseline; white-space: nowrap; }
+.odds-pct-sign { font-size: 12px; font-weight: 700; color: var(--t2); margin-left: 1px; }
+.odds-se { font-size: 10px; font-weight: 600; color: var(--t3); margin-left: 5px; align-self: center; }
+.odds-foot { font-size: 10px; color: var(--t3); padding: 14px 4px 0; line-height: 1.5; }
+
+.odds-roster { padding: 4px 2px 12px; display: flex; flex-direction: column; gap: 1px; animation: tabFade 0.18s ease; }
+.roster-team { display: grid; grid-template-columns: 18px 1fr auto auto; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 6px; }
+.roster-team.out { opacity: 0.38; }
+.roster-flag { font-size: 14px; }
+.roster-name { font-size: 13px; color: var(--t1); font-weight: 500; }
+.roster-rec { font-size: 11px; color: var(--t2); font-variant-numeric: tabular-nums; }
+.roster-pts { font-size: 13px; font-weight: 700; color: var(--t1); font-variant-numeric: tabular-nums; min-width: 14px; text-align: right; }
+
+/* ──────────────────────────────────────
+   INSIGHTS — today swings + factors
+────────────────────────────────────── */
+.today-row { padding: 12px 2px; border-bottom: 1px solid var(--line); }
+.today-row:last-child { border-bottom: none; }
+.today-match { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
+.today-teams { font-size: 14px; font-weight: 700; color: var(--t1); letter-spacing: -0.01em; }
+.today-v { color: var(--t3); font-weight: 600; font-size: 11px; margin: 0 2px; }
+.today-time { font-size: 11px; color: var(--t2); font-weight: 500; white-space: nowrap; }
+.today-swing { display: flex; align-items: baseline; gap: 7px; font-size: 12px; color: var(--t2); flex-wrap: wrap; }
+.today-swing strong { color: var(--t1); font-weight: 700; }
+.today-prob { font-weight: 800; color: var(--green); font-variant-numeric: tabular-nums; }
+.today-if { color: var(--t2); }
+.today-swing.muted { color: var(--t3); font-style: italic; }
+
+.who-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+.who-chip {
+  font-size: 12px; font-weight: 600; color: var(--t2);
+  background: var(--card-2); border: 1px solid var(--line-2); border-radius: 16px;
+  padding: 6px 12px; cursor: pointer; font-family: inherit;
+}
+.who-chip.active { color: var(--bg); background: var(--t1); border-color: var(--t1); font-weight: 700; }
+
+.factor-group { margin-bottom: 16px; }
+.factor-group-head { font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 6px; }
+.factor-group-head.up { color: var(--green); }
+.factor-group-head.down { color: #d9706b; }
+.factor-row { display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.factor-row:last-child { border-bottom: none; }
+.factor-flag { font-size: 18px; }
+.factor-mid { min-width: 0; }
+.factor-label { font-size: 13px; font-weight: 600; color: var(--t1); letter-spacing: -0.01em; }
+.factor-prob { font-size: 11px; color: var(--t2); font-weight: 500; }
+.factor-delta { display: flex; align-items: baseline; gap: 5px; font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fd-from { color: var(--t2); }
+.fd-arrow { font-size: 11px; }
+.factor-delta.up .fd-to, .factor-delta.up .fd-arrow { color: var(--green); }
+.factor-delta.down .fd-to, .factor-delta.down .fd-arrow { color: #d9706b; }

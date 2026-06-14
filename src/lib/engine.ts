@@ -9,6 +9,7 @@ import {
   ProjectionResult,
   Stage,
   TeamProjection,
+  TournamentFactor,
 } from "./types";
 import { mulberry32 } from "./probability";
 
@@ -64,21 +65,20 @@ function buildTeamRuntime(input: EngineInput): TeamRuntime[] {
   const koMap = new Map(input.knockoutOdds.map((k) => [k.team, k.reach]));
   return input.records.map((t) => {
     const reach = koMap.get(t.name) || {};
-    const stages = KNOCKOUT_STAGES;
-    // reach[r32] is entry prob; subsequent are conditional win probs.
-    const reachFirst = clamp01(reach[stages[0]] ?? 0);
+    // KNOCKOUT_STAGES are six cumulative reach levels (r32 … champion). A team
+    // "wins" the match between level i and i+1 with conditional probability
+    // reach[i+1] / reach[i]; there are five such matches.
+    const levels = KNOCKOUT_STAGES;
+    const reachFirst = clamp01(reach[levels[0]] ?? 0);
     const condWin: number[] = [];
     let analyticWins = 0;
-    let prevReach = reachFirst;
-    for (let i = 0; i < stages.length; i++) {
-      const here = clamp01(reach[stages[i]] ?? 0);
-      const nextReach = i + 1 < stages.length ? clamp01(reach[stages[i + 1]] ?? 0) : winFinalProb(reach);
-      // conditional prob of winning THIS round's match given alive at this round
-      const cw = here > 0 ? clamp01(nextReach / here) : 0;
-      condWin.push(cw);
-      // analytic expected wins contribution = P(reach next round) = nextReach
+    for (let i = 0; i < levels.length - 1; i++) {
+      const here = clamp01(reach[levels[i]] ?? 0);
+      const nextReach = clamp01(reach[levels[i + 1]] ?? 0);
+      // conditional prob of winning THIS match given alive at this level
+      condWin.push(here > 0 ? clamp01(nextReach / here) : 0);
+      // analytic expected wins contribution = P(reach next level) = nextReach
       analyticWins += nextReach;
-      prevReach = here;
     }
     return {
       name: t.name,
@@ -89,15 +89,6 @@ function buildTeamRuntime(input: EngineInput): TeamRuntime[] {
       expRemainingWins: analyticWins,
     };
   });
-}
-
-// P(win the final) — if a dedicated "win cup" market exists use it, else
-// treat reaching the final with a 50% coin as a fallback.
-function winFinalProb(reach: Partial<Record<Stage, number>>): number {
-  const finalReach = reach["final"] ?? 0;
-  // If a champion market was mapped onto "final" we can't distinguish; assume
-  // reach["final"] already encodes "win cup" when present from the champion event.
-  return clamp01(finalReach);
 }
 
 function clamp01(x: number): number {
@@ -171,6 +162,19 @@ export function runProjection(input: EngineInput): ProjectionResult {
   const homeFirst = new Float64Array(F * P); // Σ first-place credit when home won
   const awayFirst = new Float64Array(F * P); // Σ first-place credit when away won
   const firstCredit = new Float64Array(P);   // this iteration's rank-1 credit per player
+  const firstTotal = new Float64Array(P);    // Σ rank-1 credit over all iters (→ pFirst)
+
+  // ---- Knockout-milestone bookkeeping --------------------------------------
+  // To rank the high-variance "what-if" factors (e.g. "Portugal reaches the SF"),
+  // we record, per iteration, the deepest knockout level each team reached
+  // (0 = out before R32, 1 = R32, … 6 = champion), then histogram first-place
+  // credit by (team, level). Suffix-summing later gives, for any reach threshold,
+  // P(team reaches it) and P(player wins pool | team did / didn't reach it).
+  const T = teams.length;
+  const LEVELS = 7; // 0..6
+  const teamLevel = new Int8Array(T);                 // per-iter deepest level per team
+  const teamLevelN = new Float64Array(T * LEVELS);    // count of iters at each exact level
+  const teamLevelFirst = new Float64Array(T * LEVELS * P); // Σ first credit at each exact level
 
   for (let it = 0; it < iterations; it++) {
     const pts = basePoints.slice();
@@ -191,19 +195,21 @@ export function runProjection(input: EngineInput): ProjectionResult {
       }
     }
 
-    // 2) Knockout — sequential survival per team.
-    for (const t of teams) {
-      let alive = rng() < t.reachFirst; // reached R32?
-      if (!alive) continue;
+    // 2) Knockout — sequential survival per team. Track deepest level reached:
+    //    level 1 = R32, then +1 per match won, up to 6 = champion.
+    for (let ti = 0; ti < T; ti++) {
+      const t = teams[ti];
+      if (rng() >= t.reachFirst) { teamLevel[ti] = 0; continue; } // missed R32
+      let level = 1; // reached R32
       for (let s = 0; s < t.condWin.length; s++) {
-        const won = rng() < t.condWin[s];
-        if (won) {
+        if (rng() < t.condWin[s]) {
           addWinByOwner(pts, playerIndex, t.owner);
+          level++;
         } else {
-          alive = false;
           break;
         }
       }
+      teamLevel[ti] = level;
     }
 
     // 3) Rank players this iteration. Ties are split FRACTIONALLY so the
@@ -237,6 +243,7 @@ export function runProjection(input: EngineInput): ProjectionResult {
     while (topG < order.length && order[topG].v === order[0].v) topG++;
     const perTop = 1 / topG;
     for (let m = 0; m < topG; m++) firstCredit[order[m].i] = perTop;
+    for (let i = 0; i < P; i++) firstTotal[i] += firstCredit[i];
 
     // Attribute that credit to each fixture's outcome bucket (home/away wins).
     for (let fi = 0; fi < F; fi++) {
@@ -251,26 +258,52 @@ export function runProjection(input: EngineInput): ProjectionResult {
         for (let i = 0; i < P; i++) awayFirst[base + i] += firstCredit[i];
       }
     }
+
+    // Attribute credit to each team's deepest-level bucket for milestone factors.
+    for (let ti = 0; ti < T; ti++) {
+      const lvl = teamLevel[ti];
+      teamLevelN[ti * LEVELS + lvl]++;
+      const base = (ti * LEVELS + lvl) * P;
+      for (let i = 0; i < P; i++) teamLevelFirst[base + i] += firstCredit[i];
+    }
   }
 
   // ---- Resolve per-fixture swing from the conditional first-place rates -----
+  // swing[player] = P(player wins pool | this fixture was a home win)
+  //               − P(...| away win). Because each fixture's outcome is drawn
+  // independently of all others, this conditional contrast is the causal effect
+  // of the result on that player's title odds. The two conditional rates are
+  // estimated from DISJOINT iteration buckets (home-win iters vs away-win iters),
+  // so the contrast's variance is the sum of two binomial-proportion variances —
+  // small for coin-flip games, large for lopsided ones where one bucket is thin.
   const fixtureProjections: FixtureProjection[] = oddFixtures.map((f, fi) => {
     const base = fi * P;
+    const nH = homeN[fi];
+    const nA = awayN[fi];
     let best = 0;
+    let bestSE = 0;
     let bestPlayer: string | undefined;
     let toward: "home" | "away" | undefined;
-    if (homeN[fi] > 0 && awayN[fi] > 0) {
+    // Raw conditional title odds per player: P(win pool | home win) and | away win.
+    const playerSwings: { player: string; pHome: number; pAway: number }[] = [];
+    if (nH > 0 && nA > 0) {
       for (let i = 0; i < P; i++) {
-        const pHome = homeFirst[base + i] / homeN[fi];
-        const pAway = awayFirst[base + i] / awayN[fi];
+        const pHome = homeFirst[base + i] / nH;
+        const pAway = awayFirst[base + i] / nA;
+        playerSwings.push({ player: players[i], pHome: round4(pHome), pAway: round4(pAway) });
         const d = Math.abs(pHome - pAway);
         if (d > best) {
           best = d;
+          // SE of the difference of two independent binomial proportions.
+          bestSE = Math.sqrt(
+            (pHome * (1 - pHome)) / nH + (pAway * (1 - pAway)) / nA
+          );
           bestPlayer = players[i];
           toward = pHome > pAway ? "home" : "away";
         }
       }
     }
+    playerSwings.sort((a, b) => Math.abs(b.pHome - b.pAway) - Math.abs(a.pHome - a.pAway));
     return {
       id: f.id,
       home: f.home,
@@ -280,13 +313,86 @@ export function runProjection(input: EngineInput): ProjectionResult {
       kickoff: f.kickoff,
       oddsHome: f.oddsHome,
       swing: round4(best),
+      swingSE: round4(bestSE),
       swingPlayer: bestPlayer,
       swingToward: toward,
+      playerSwings,
     };
   });
   fixtureProjections.sort((a, b) => b.swing - a.swing);
 
   const knockoutTeams = teams.filter((t) => t.reachFirst > 0).length;
+
+  // ---- High-variance knockout factors per player ---------------------------
+  // For every (team, reach-threshold) we know P(team reaches it) = q and the
+  // player's title odds with / without it. The *explained variance*
+  //   EV = q(1−q)(pYes − pNo)²
+  // ranks how much a factor actually moves the needle: it is large only when the
+  // event is genuinely uncertain (q near ½) AND it shifts the player's odds — so
+  // longshots like "Curacao wins the cup" (q≈0) fall out automatically. We keep,
+  // per player, the single highest-EV milestone per team, then the top few teams.
+  const stageVerb: Record<Stage, string> = {
+    group: "plays the group stage",
+    r32: "reaches the knockout stage",
+    r16: "reaches the Round of 16",
+    qf: "reaches the Quarterfinal",
+    sf: "reaches the Semifinal",
+    final: "reaches the Final",
+    champion: "wins the World Cup",
+  };
+  const reachStages = KNOCKOUT_STAGES; // r32 … champion (levels 1..6)
+  const playerFactors = players.map((p, pi) => {
+    const total = firstTotal[pi];
+    const perTeam: TournamentFactor[] = [];
+    for (let ti = 0; ti < T; ti++) {
+      // suffix sums: nAtLeast[L] = iters where team reached at least level L,
+      // firstAtLeast[L] = this player's first-place credit over those iters.
+      let cumN = 0;
+      let runFirst = 0;
+      const nAtLeast: number[] = new Array(LEVELS).fill(0);
+      const firstAtLeast: number[] = new Array(LEVELS).fill(0);
+      for (let lvl = LEVELS - 1; lvl >= 0; lvl--) {
+        cumN += teamLevelN[ti * LEVELS + lvl];
+        runFirst += teamLevelFirst[(ti * LEVELS + lvl) * P + pi];
+        nAtLeast[lvl] = cumN;
+        firstAtLeast[lvl] = runFirst;
+      }
+      let bestEV = 0;
+      let bestFactor: TournamentFactor | null = null;
+      for (let lvl = 1; lvl < LEVELS; lvl++) {
+        const stage = reachStages[lvl - 1];
+        const nYes = nAtLeast[lvl];
+        const q = nYes / iterations;
+        if (q < 0.04 || q > 0.96) continue; // not uncertain enough to matter
+        const nNo = iterations - nYes;
+        if (nYes < 50 || nNo < 50) continue;
+        const pYes = firstAtLeast[lvl] / nYes;
+        const pNo = (total - firstAtLeast[lvl]) / nNo;
+        const ev = q * (1 - q) * (pYes - pNo) * (pYes - pNo);
+        if (ev > bestEV) {
+          bestEV = ev;
+          bestFactor = {
+            team: teams[ti].name,
+            owner: teams[ti].owner,
+            stage,
+            label: `${teams[ti].name} ${stageVerb[stage]}`,
+            prob: round4(q),
+            pYes: round4(pYes),
+            pNo: round4(pNo),
+            impact: round4(Math.sqrt(ev)),
+          };
+        }
+      }
+      if (bestFactor) perTeam.push(bestFactor);
+    }
+    perTeam.sort((a, b) => b.impact - a.impact);
+    // Surface both upside (a team's run that HELPS this player — usually their own)
+    // and downside (a rival's run that HURTS), so the picture isn't all good news.
+    const boosts = perTeam.filter((f) => f.pYes >= f.pNo).slice(0, 4);
+    const risks = perTeam.filter((f) => f.pYes < f.pNo).slice(0, 2);
+    const factors = [...boosts, ...risks].sort((a, b) => b.impact - a.impact);
+    return { player: p, factors };
+  });
 
   const playerProjections: PlayerProjection[] = players.map((p, i) => {
     const dist = finishCounts[i].map((c) => c / iterations);
@@ -309,6 +415,7 @@ export function runProjection(input: EngineInput): ProjectionResult {
   return {
     players: playerProjections,
     fixtures: fixtureProjections,
+    playerFactors,
     status: {
       // Sources are filled in by the orchestrator, which knows the real feed
       // outcome; the engine only knows the counts it was handed.

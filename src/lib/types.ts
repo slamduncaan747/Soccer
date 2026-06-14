@@ -2,13 +2,17 @@
 
 export type Stage =
   | "group"
-  | "r32"   // Round of 32 (48-team format)
+  | "r32"   // Round of 32 (48-team format) — i.e. qualified from group
   | "r16"
   | "qf"
   | "sf"
-  | "final";
+  | "final"     // reached the final (won the semifinal)
+  | "champion"; // won the final (won the cup)
 
-export const KNOCKOUT_STAGES: Stage[] = ["r32", "r16", "qf", "sf", "final"];
+// Cumulative knockout REACH levels, in order. Six levels span five knockout
+// matches (R32, R16, QF, SF, Final): a team "wins" the match at level i iff it
+// reaches level i+1. `final` = reach the final; `champion` = win the final.
+export const KNOCKOUT_STAGES: Stage[] = ["r32", "r16", "qf", "sf", "final", "champion"];
 
 export interface ThreeWay {
   win: number;
@@ -69,12 +73,35 @@ export interface FixtureProjection {
   // swing = max over players of |P(wins pool | home win) − P(wins pool | away win)|.
   // The single most title-relevant number we can attach to a fixture.
   swing: number;
+  swingSE?: number;              // Monte-Carlo standard error of `swing` (thin buckets ⇒ larger)
   swingPlayer?: string;          // the player whose title odds move most on this result
   swingToward?: "home" | "away"; // which result helps that player
+  // Per-player RAW conditional title odds for this fixture: P(win pool | home win)
+  // and P(win pool | away win). Lets the UI show "14% → 19%" rather than a delta.
+  playerSwings?: { player: string; pHome: number; pAway: number }[];
   // Live match data (populated from football-data.org during active matches)
   liveStatus?: "IN_PLAY" | "PAUSED" | "HALFTIME" | "FINISHED";
   liveScore?: { home: number; away: number };
   liveMinute?: number;
+}
+
+// A high-variance "what-if" for a player: a knockout milestone (team reaches a
+// round) ranked by how much it actually moves their title odds. `prob` is how
+// likely the event is; `pYes`/`pNo` are the player's title odds with/without it.
+export interface TournamentFactor {
+  team: string;
+  owner: string;            // the team's owner (may differ from the viewing player)
+  stage: Stage;             // the reach threshold the event represents
+  label: string;            // e.g. "Portugal reaches the Semifinal"
+  prob: number;             // P(event happens)
+  pYes: number;             // P(viewing player wins pool | event happens)
+  pNo: number;              // P(viewing player wins pool | event does NOT happen)
+  impact: number;           // √(explained variance) — the ranking key
+}
+
+export interface PlayerFactors {
+  player: string;
+  factors: TournamentFactor[]; // top high-variance factors, strongest first
 }
 
 // Health of the live data pipeline, surfaced in the UI so users can see
@@ -91,6 +118,7 @@ export interface DataStatus {
 export interface ProjectionResult {
   players: PlayerProjection[];
   fixtures: FixtureProjection[];    // remaining group matches, sorted by swing desc
+  playerFactors: PlayerFactors[];   // per-player high-variance knockout what-ifs
   status: DataStatus;
   iterations: number;
   generatedAt: string;

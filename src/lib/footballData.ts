@@ -41,8 +41,8 @@ interface FDMatchFull {
   status: string;
   stage: string;
   utcDate: string;
-  homeTeam: { name: string };
-  awayTeam: { name: string };
+  homeTeam: { name: string | null };
+  awayTeam: { name: string | null };
   score?: {
     winner?: "HOME_TEAM" | "AWAY_TEAM" | "DRAW" | null;
     fullTime?: { home: number | null; away: number | null };
@@ -60,7 +60,8 @@ function fdAliases(): Map<string, string> {
   return m;
 }
 
-function canon(name: string, aliases: Map<string, string>): string | null {
+function canon(name: string | null | undefined, aliases: Map<string, string>): string | null {
+  if (!name) return null;
   const l = name.toLowerCase();
   if (aliases.has(l)) return aliases.get(l)!;
   for (const [a, c] of aliases) if (l.includes(a) || a.includes(l)) return c;
@@ -129,9 +130,11 @@ export async function fetchAllWCMatches(): Promise<WCData | null> {
       const home = canon(m.homeTeam.name, aliases);
       const away = canon(m.awayTeam.name, aliases);
       if (!home || !away) {
-        // Only warn for pool-adjacent teams — TBD slots are expected in early scheduling
-        if (m.homeTeam.name !== "TBD" && m.awayTeam.name !== "TBD") {
-          console.warn(`[footballData] unresolved: "${m.homeTeam.name}" vs "${m.awayTeam.name}"`);
+        // Only warn for pool-adjacent teams — TBD/null slots are expected in early scheduling
+        const hn = m.homeTeam.name;
+        const an = m.awayTeam.name;
+        if (hn && an && hn !== "TBD" && an !== "TBD") {
+          console.warn(`[footballData] unresolved: "${hn}" vs "${an}"`);
         }
         continue;
       }

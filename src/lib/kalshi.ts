@@ -1,55 +1,59 @@
-import { GroupFixture, KnockoutOdds, Stage, ThreeWay } from "./types";
-import { normalize3, priceToProb } from "./probability";
+import { GroupFixture, KnockoutOdds, Stage } from "./types";
+import { normalize3 } from "./probability";
 import { ALL_TEAMS } from "../data/pool";
 
 // Kalshi public market-data base — NO auth required for reads.
-// (Despite legacy naming, this serves ALL Kalshi markets.)
 const KALSHI_BASE = "https://external-api.kalshi.com/trade-api/v2";
 
-// Series tickers are not guaranteed stable; these are best-effort guesses that
-// the resolver below will confirm via the /series search. Override via env.
-const WC_SERIES_HINTS = (process.env.KALSHI_WC_SERIES || "KXWORLDCUP,KXWC2026,KXFIFAWC")
-  .split(",")
-  .map((s) => s.trim());
+// Real 2026 Men's World Cup series tickers (confirmed against the live API).
+// Override via env if Kalshi renames them.
+//   KXWCGROUPQUAL — P(team qualifies from its group → reaches the Round of 32)
+//   KXWCROUND     — per-team P(reach Round of 16 / Quarterfinal / Semifinal / Final)
+//   KXMENWORLDCUP — P(team wins the World Cup)
+//   KXWCGAME      — per-match 3-way (home win / draw / away win) for every group game
+const SERIES = {
+  qualify: process.env.KALSHI_WC_QUALIFY_SERIES || "KXWCGROUPQUAL",
+  round: process.env.KALSHI_WC_ROUND_SERIES || "KXWCROUND",
+  champion: process.env.KALSHI_WC_CHAMPION_SERIES || "KXMENWORLDCUP",
+  game: process.env.KALSHI_WC_GAME_SERIES || "KXWCGAME",
+};
 
 interface KalshiMarket {
   ticker: string;
-  title?: string;
+  event_ticker?: string;
   yes_sub_title?: string;
   subtitle?: string;
-  last_price?: number; // cents
-  yes_bid?: number;
-  yes_ask?: number;
+  title?: string;
+  // Current Kalshi price fields are fixed-point dollar STRINGS in [0,1]
+  // (e.g. "0.7300" = 73%). The legacy integer-cent fields (last_price,
+  // yes_bid, yes_ask) are deprecated and now return null — do not use them.
+  yes_bid_dollars?: string | null;
+  yes_ask_dollars?: string | null;
+  last_price_dollars?: string | null;
   status?: string;
 }
 
-interface KalshiEvent {
-  event_ticker: string;
-  title?: string;
-  markets?: KalshiMarket[];
+function num(s: string | null | undefined): number | null {
+  if (s == null) return null;
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : null;
 }
 
-async function kalshiGet<T>(path: string): Promise<T | null> {
-  try {
-    const res = await fetch(`${KALSHI_BASE}${path}`, {
-      headers: { Accept: "application/json" },
-      // Cache server-side for a minute; markets move but not by the second for our needs.
-      next: { revalidate: 60 },
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
-  } catch {
-    return null;
-  }
+function clamp01(x: number): number {
+  return Math.max(0, Math.min(1, x));
 }
 
-// Best YES-side probability estimate for a market: prefer the midpoint of
-// bid/ask if both present (tighter than last trade), else last_price.
+// A market's YES probability: prefer the bid/ask midpoint (most current),
+// fall back to last trade, then the ask alone. Returns null if truly unpriced.
 function marketProb(m: KalshiMarket): number | null {
-  if (m.yes_bid != null && m.yes_ask != null && m.yes_ask >= m.yes_bid) {
-    return priceToProb((m.yes_bid + m.yes_ask) / 2);
+  const bid = num(m.yes_bid_dollars);
+  const ask = num(m.yes_ask_dollars);
+  const last = num(m.last_price_dollars);
+  if (bid != null && ask != null && ask >= bid && bid + ask > 0) {
+    return clamp01((bid + ask) / 2);
   }
-  if (m.last_price != null) return priceToProb(m.last_price);
+  if (last != null && last > 0) return clamp01(last);
+  if (ask != null && ask > 0) return clamp01(ask);
   return null;
 }
 
@@ -65,98 +69,189 @@ function teamAliases(): Map<string, string> {
 
 function matchTeam(label: string | undefined, aliases: Map<string, string>): string | null {
   if (!label) return null;
-  const l = label.toLowerCase();
+  const l = label.toLowerCase().trim();
+  // Exact match first to avoid substring false positives (e.g. "Austria"/"Australia").
+  if (aliases.has(l)) return aliases.get(l)!;
   for (const [alias, canon] of aliases) {
     if (l.includes(alias)) return canon;
   }
   return null;
 }
 
-// Pull tournament-advance markets: P(team reaches round X / wins cup).
-// We look for events whose title references the stage and read each team's YES prob.
+// Kalshi's free read tier rate-limits bursts (HTTP 429). To keep odds stable
+// across rapid page reloads we keep the last successful payload per series and:
+//   1) serve it directly while still fresh (no network call at all), and
+//   2) fall back to it (stale) whenever a fetch is rate-limited or fails,
+// so a transient 429 never blanks the projection.
+interface MarketCacheEntry {
+  markets: KalshiMarket[];
+  ts: number;
+}
+const FRESH_MS = 60_000;
+const marketCache = new Map<string, MarketCacheEntry>();
+const inflight = new Map<string, Promise<KalshiMarket[]>>();
+
+async function fetchSeriesMarkets(series: string): Promise<KalshiMarket[]> {
+  const cached = marketCache.get(series);
+  if (cached && Date.now() - cached.ts < FRESH_MS) return cached.markets;
+
+  // Collapse concurrent requests for the same series into one network call.
+  const existing = inflight.get(series);
+  if (existing) return existing;
+
+  const p = (async (): Promise<KalshiMarket[]> => {
+    try {
+      const res = await fetch(
+        `${KALSHI_BASE}/markets?series_ticker=${encodeURIComponent(series)}&limit=1000`,
+        { headers: { Accept: "application/json" }, cache: "no-store" }
+      );
+      if (!res.ok) {
+        const fallback = cached ? " — serving last-good cache" : "";
+        console.warn(`[kalshi] ${series} → HTTP ${res.status}${fallback}`);
+        return cached?.markets ?? [];
+      }
+      const data = (await res.json()) as { markets?: KalshiMarket[] };
+      const markets = data.markets ?? [];
+      if (markets.length) marketCache.set(series, { markets, ts: Date.now() });
+      return markets;
+    } catch (e) {
+      console.warn(`[kalshi] ${series} fetch failed${cached ? " — serving last-good cache" : ""}:`, e);
+      return cached?.markets ?? [];
+    } finally {
+      inflight.delete(series);
+    }
+  })();
+
+  inflight.set(series, p);
+  return p;
+}
+
+// Force the reach ladder to be non-increasing (reach R32 ≥ R16 ≥ QF ≥ SF ≥ win).
+// Market noise can violate this; the engine divides successive reach probs, so a
+// dirty ladder would produce conditional probabilities outside [0,1].
+function monotone(reach: Partial<Record<Stage, number>>): Partial<Record<Stage, number>> {
+  const order: Stage[] = ["r32", "r16", "qf", "sf", "final", "champion"];
+  const out: Partial<Record<Stage, number>> = {};
+  let cap = 1;
+  for (const s of order) {
+    const v = reach[s];
+    if (v != null) {
+      const capped = Math.min(v, cap);
+      out[s] = capped;
+      cap = capped;
+    }
+  }
+  return out;
+}
+
+// Per-team knockout survival probabilities from Kalshi markets. Six cumulative
+// reach levels span the five knockout matches, so the final match (reach-final →
+// champion) is modeled explicitly rather than collapsed into the champion market:
+//   r32      ← KXWCGROUPQUAL   (qualify from group)
+//   r16      ← KXWCROUND-*RO16
+//   qf       ← KXWCROUND-*QUAR
+//   sf       ← KXWCROUND-*SEMI
+//   final    ← KXWCROUND-*FINAL (reach the final)
+//   champion ← KXMENWORLDCUP    (win the final / win the cup)
 export async function fetchKnockoutOdds(): Promise<{ odds: KnockoutOdds[]; ok: boolean }> {
   const aliases = teamAliases();
   const byTeam = new Map<string, Partial<Record<Stage, number>>>();
+  const set = (team: string, stage: Stage, p: number) => {
+    const r = byTeam.get(team) ?? {};
+    r[stage] = p;
+    byTeam.set(team, r);
+  };
 
-  const stageKeywords: [Stage, RegExp][] = [
-    ["r32", /round of 32|ro32/i],
-    ["r16", /round of 16|ro16|last 16/i],
-    ["qf", /quarter|quarterfinal|qf/i],
-    ["sf", /semi|semifinal|sf/i],
-    ["final", /win the (world cup|tournament)|champion|to win the cup|final winner/i],
-  ];
+  const [qual, round, champ] = await Promise.all([
+    fetchSeriesMarkets(SERIES.qualify),
+    fetchSeriesMarkets(SERIES.round),
+    fetchSeriesMarkets(SERIES.champion),
+  ]);
 
-  let foundAny = false;
-
-  for (const series of WC_SERIES_HINTS) {
-    const data = await kalshiGet<{ events?: KalshiEvent[] }>(
-      `/events?series_ticker=${encodeURIComponent(series)}&with_nested_markets=true&limit=200`
-    );
-    if (!data?.events?.length) continue;
-
-    for (const ev of data.events) {
-      const stageEntry = stageKeywords.find(([, re]) => re.test(ev.title || ""));
-      if (!stageEntry) continue;
-      const [stage] = stageEntry;
-
-      for (const mk of ev.markets || []) {
-        const team = matchTeam(mk.yes_sub_title || mk.subtitle || mk.title, aliases);
-        if (!team) continue;
-        const p = marketProb(mk);
-        if (p == null) continue;
-        foundAny = true;
-        const rec = byTeam.get(team) || {};
-        rec[stage] = p;
-        byTeam.set(team, rec);
-      }
-    }
+  for (const m of qual) {
+    const team = matchTeam(m.yes_sub_title || m.subtitle, aliases);
+    const p = marketProb(m);
+    if (team && p != null) set(team, "r32", p);
   }
 
-  const odds: KnockoutOdds[] = [...byTeam.entries()].map(([team, reach]) => ({ team, reach }));
-  return { odds, ok: foundAny };
+  // Order matters: /FINAL/ must be tested before nothing else collides, and the
+  // RO16/QUAR/SEMI/FINAL suffixes are mutually exclusive in the event ticker.
+  const roundStage: [RegExp, Stage][] = [
+    [/RO16/i, "r16"],
+    [/QUAR/i, "qf"],
+    [/SEMI/i, "sf"],
+    [/FINAL/i, "final"], // reach the final (NOT win it)
+  ];
+  for (const m of round) {
+    const ev = m.event_ticker || "";
+    const stage = roundStage.find(([re]) => re.test(ev))?.[1];
+    if (!stage) continue;
+    const team = matchTeam(m.yes_sub_title || m.subtitle, aliases);
+    const p = marketProb(m);
+    if (team && p != null) set(team, stage, p);
+  }
+
+  // Champion market = win the final → the terminal `champion` reach level.
+  for (const m of champ) {
+    const team = matchTeam(m.yes_sub_title || m.subtitle, aliases);
+    const p = marketProb(m);
+    if (team && p != null) set(team, "champion", p);
+  }
+
+  const odds: KnockoutOdds[] = [...byTeam.entries()].map(([team, reach]) => ({
+    team,
+    reach: monotone(reach),
+  }));
+
+  const ok = odds.some((o) => Object.keys(o.reach).length > 0);
+  console.log(`[kalshi] knockout: ${odds.length} teams with reach markets (ok=${ok})`);
+  return { odds, ok };
 }
 
-// Pull per-match 3-way group markets where available.
-// Kalshi soccer match markets vary; we look for events titled like "X vs Y"
-// and try to read win/draw/loss legs. Returns [] if none parse — the engine
-// then treats those group matches as unknown (skipped from sim contribution).
+// Per-match 3-way group odds from the KXWCGAME series. Each game is one event
+// (e.g. "Germany vs Curacao") holding three markets: the two teams + "Tie".
+// We read each leg's YES probability and de-vig the trio into a coherent
+// {win, draw, loss} distribution. Home/away orientation is internal — the
+// orchestrator matches fixtures to the FD schedule in either orientation.
 export async function fetchGroupFixtures(): Promise<{ fixtures: GroupFixture[]; ok: boolean }> {
   const aliases = teamAliases();
-  const fixtures: GroupFixture[] = [];
-  let ok = false;
+  const markets = await fetchSeriesMarkets(SERIES.game);
 
-  for (const series of WC_SERIES_HINTS) {
-    const data = await kalshiGet<{ events?: KalshiEvent[] }>(
-      `/events?series_ticker=${encodeURIComponent(series)}&with_nested_markets=true&limit=200`
-    );
-    if (!data?.events?.length) continue;
-
-    for (const ev of data.events) {
-      const vs = (ev.title || "").match(/(.+?)\s+(?:vs\.?|v\.?|@|-)\s+(.+)/i);
-      if (!vs) continue;
-      const home = matchTeam(vs[1], aliases);
-      const away = matchTeam(vs[2], aliases);
-      if (!home || !away) continue;
-
-      // Try to find three legs by subtitle keywords.
-      let win: number | null = null,
-        draw: number | null = null,
-        loss: number | null = null;
-      for (const mk of ev.markets || []) {
-        const sub = (mk.yes_sub_title || mk.subtitle || "").toLowerCase();
-        const p = marketProb(mk);
-        if (p == null) continue;
-        if (/draw|tie/.test(sub)) draw = p;
-        else if (sub.includes(home.toLowerCase())) win = p;
-        else if (sub.includes(away.toLowerCase())) loss = p;
-      }
-      if (win != null && draw != null && loss != null) {
-        const odds: ThreeWay = normalize3({ win, draw, loss });
-        fixtures.push({ id: ev.event_ticker, home, away, oddsHome: odds });
-        ok = true;
-      }
-    }
+  const byEvent = new Map<string, KalshiMarket[]>();
+  for (const m of markets) {
+    const ek = m.event_ticker;
+    if (!ek) continue;
+    const arr = byEvent.get(ek) ?? [];
+    arr.push(m);
+    byEvent.set(ek, arr);
   }
 
+  const fixtures: GroupFixture[] = [];
+  for (const [ek, legs] of byEvent) {
+    let tie: number | null = null;
+    const teams: { name: string; p: number }[] = [];
+    for (const m of legs) {
+      const sub = (m.yes_sub_title || m.subtitle || "").trim();
+      const p = marketProb(m);
+      if (p == null) continue;
+      if (/^tie$|draw/i.test(sub)) {
+        tie = p;
+        continue;
+      }
+      const team = matchTeam(sub, aliases);
+      if (team) teams.push({ name: team, p });
+    }
+    if (teams.length !== 2 || tie == null) continue;
+    const [home, away] = teams;
+    fixtures.push({
+      id: ek,
+      home: home.name,
+      away: away.name,
+      oddsHome: normalize3({ win: home.p, draw: tie, loss: away.p }),
+    });
+  }
+
+  const ok = fixtures.length > 0;
+  console.log(`[kalshi] group: ${fixtures.length} fixtures with 3-way odds (ok=${ok})`);
   return { fixtures, ok };
 }

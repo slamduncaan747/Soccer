@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ProjectionResult, PlayerProjection, FixtureProjection } from "@/lib/types";
+import type { ProjectionResult, PlayerProjection, FixtureProjection, PlayerFactors, TournamentFactor } from "@/lib/types";
 
-type Tab = "matches" | "table" | "insights";
+type Tab = "matches" | "odds" | "insights";
 
 const DISPLAY_NAME: Record<string, string> = { Isiah: "Zeke" };
 const displayName = (name: string) => DISPLAY_NAME[name] ?? name;
@@ -49,8 +49,12 @@ const FLAGS: Record<string, string> = {
   "Jordan": "🇯🇴", "Haiti": "🇭🇹", "New Zealand": "🇳🇿", "Curacao": "🇨🇼",
 };
 const flag = (team: string) => FLAGS[team] ?? "🏳️";
-const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 const round1 = (n: number) => Math.round(n * 10) / 10;
+
+// Monte-Carlo standard error of a probability estimate from N iterations.
+const mcSE = (p: number, n: number) => (n > 0 ? Math.sqrt((p * (1 - p)) / n) : 0);
+// A team with essentially no expected remaining wins is effectively out.
+const isAlive = (expRemainingWins: number) => expRemainingWins >= 0.05;
 
 // Feature 3: Live match helpers
 function isLiveByTime(kickoff: string | undefined): boolean {
@@ -96,26 +100,10 @@ export default function Page() {
           <span className="app-title">WC26 Pool</span>
           {leader && (
             <span className="app-leader-callout">
-              <strong style={{ color: playerColor(leader.player) }}>{displayName(leader.player)}</strong>
-              {" "}leads · {leader.currentPoints} pts
+              {displayName(leader.player)} leads · {leader.currentPoints} pts
             </span>
           )}
         </div>
-        {data && (
-          <div className="app-status-strip">
-            <div className={`status-pill${data.status.groupSource === "kalshi" ? " live" : " warn"}`}>
-              <span className="pill-dot" />
-              {data.status.groupSource === "kalshi" ? "KALSHI ODDS" : "MOCK ODDS"}
-            </div>
-            <div className={`status-pill${data.status.liveResults ? " live" : " warn"}`}>
-              <span className="pill-dot" />
-              {data.status.liveResults ? "LIVE RESULTS" : "NO LIVE DATA"}
-            </div>
-            {data.oddsSource === "mock" && (
-              <div className="status-pill warn mock-warn">⚠ SIMULATED DATA</div>
-            )}
-          </div>
-        )}
       </header>
 
       <main className="page">
@@ -132,8 +120,8 @@ export default function Page() {
         ) : (
           <div className="tab-pane" key={tab}>
             {tab === "matches"  && <MatchesTab fixtures={data.fixtures} />}
-            {tab === "table"    && <TableTab players={data.players} fixtures={data.fixtures} />}
-            {tab === "insights" && <InsightsTab players={data.players} fixtures={data.fixtures} />}
+            {tab === "odds"     && <OddsTab players={data.players} iterations={data.iterations} />}
+            {tab === "insights" && <InsightsTab players={data.players} fixtures={data.fixtures} playerFactors={data.playerFactors} />}
           </div>
         )}
       </main>
@@ -142,8 +130,8 @@ export default function Page() {
         <button className={`tab-btn ${tab === "matches" ? "active" : ""}`} onClick={() => setTab("matches")}>
           <CalendarIcon /> Matches
         </button>
-        <button className={`tab-btn ${tab === "table" ? "active" : ""}`} onClick={() => setTab("table")}>
-          <TableIcon /> Table
+        <button className={`tab-btn ${tab === "odds" ? "active" : ""}`} onClick={() => setTab("odds")}>
+          <TableIcon /> Odds
         </button>
         <button className={`tab-btn ${tab === "insights" ? "active" : ""}`} onClick={() => setTab("insights")}>
           <InsightsIcon /> Insights
@@ -328,103 +316,71 @@ function MatchCard({
 }
 
 /* ============================================================
-   TABLE TAB
+   ODDS TAB — title odds, minimal & monochrome
    ============================================================ */
-function TableTab({ players, fixtures }: { players: PlayerProjection[]; fixtures: FixtureProjection[] }) {
+function OddsTab({ players, iterations }: { players: PlayerProjection[]; iterations: number }) {
   const [open, setOpen] = useState<string | null>(null);
-
-  const sorted = useMemo(
-    () => [...players].sort(
-      (a, b) => b.currentPoints - a.currentPoints || b.expectedFinalPoints - a.expectedFinalPoints
-    ),
-    [players]
-  );
-
-  const maxPts = Math.max(...sorted.map((p) => p.currentPoints), 1);
-
-  // Feature 4: live adjustments
-  const liveFix = useMemo(
-    () => fixtures.filter((f) => f.liveStatus != null || isLiveByTime(f.kickoff)),
-    [fixtures]
-  );
-
-  const liveAdjustments = useMemo(() => {
-    const adj: Record<string, number> = {};
-    for (const f of liveFix) {
-      const { homeOwner, awayOwner, liveScore } = f;
-      if (!liveScore) continue;
-      const { home: sh, away: sa } = liveScore;
-      if (sh > sa) {
-        adj[homeOwner] = (adj[homeOwner] ?? 0) + 3;
-      } else if (sa > sh) {
-        adj[awayOwner] = (adj[awayOwner] ?? 0) + 3;
-      } else {
-        adj[homeOwner] = (adj[homeOwner] ?? 0) + 1;
-        adj[awayOwner] = (adj[awayOwner] ?? 0) + 1;
-      }
-    }
-    return adj;
-  }, [liveFix]);
+  const sorted = useMemo(() => [...players].sort((a, b) => b.pFirst - a.pFirst), [players]);
+  const maxWin = Math.max(...sorted.map((p) => p.pFirst), 0.01);
+  const simLabel = iterations >= 1000 ? `${Math.round(iterations / 1000)}k sims` : `${iterations} sims`;
 
   return (
-    <div className="standings-wrap">
-      <div className="standings-header">
-        <span className="sh-rank">#</span>
-        <span>Player</span>
-        <span className="sh-meta">Teams · Played</span>
-        <span className="sh-pts">Pts</span>
+    <div className="odds-wrap">
+      <div className="odds-head">
+        <span className="odds-head-title">Title Odds</span>
+        <span className="odds-head-sub">{simLabel}</span>
       </div>
 
       {sorted.map((p, i) => {
         const isOpen = open === p.player;
         const isLeader = i === 0;
-        const ptPct = (p.currentPoints / maxPts) * 100;
-
-        const gamesPlayed = p.teams.reduce((s, t) => s + t.w + t.d + t.l, 0);
-        const teamsAlive = p.teams.filter((t) => {
-          const played = t.w + t.d + t.l;
-          if (played >= 2 && t.currentPoints === 0 && t.d === 0) return false;
-          if (played >= 3 && t.currentPoints === 0) return false;
-          return true;
-        }).length;
-
-        const delta = liveAdjustments[p.player];
-
+        const se = mcSE(p.pFirst, iterations);
         return (
           <div key={p.player}>
-            <div
-              className={`standing-row${isLeader ? " leader" : ""}`}
+            <button
+              className={`odds-row${isOpen ? " open" : ""}`}
               onClick={() => setOpen(isOpen ? null : p.player)}
             >
-              <span className="row-rank" style={{ color: isLeader ? "var(--green)" : playerColor(p.player) }}>
-                {i + 1}
-              </span>
-              <div className="row-info">
-                <div className="row-name">{displayName(p.player)}</div>
-              </div>
-              <div className="row-meta">
-                <span className="row-meta-stat">
-                  <span className="meta-val">{teamsAlive}</span>
-                  <span className="meta-label">/8 alive</span>
-                </span>
-                <span className="row-meta-stat">
-                  <span className="meta-val">{gamesPlayed}</span>
-                  <span className="meta-label">/24 played</span>
-                </span>
-              </div>
-              <div className="row-right">
-                <div className="row-pts-row">
-                  <span className="row-pts">{p.currentPoints}</span>
-                  {delta != null && delta > 0 && (
-                    <span className="live-delta">+{delta}</span>
-                  )}
+              <span className="odds-rank">{i + 1}</span>
+              <span className="odds-name">{displayName(p.player)}</span>
+              <div className="odds-bar-wrap">
+                <div className="odds-bar-track">
+                  <div className={`odds-bar-fill${isLeader ? " lead" : ""}`}
+                    style={{ width: `${(p.pFirst / maxWin) * 100}%` }} />
                 </div>
-                <span className="row-pts-label">pts</span>
+                <span className="odds-sub">{p.currentPoints} pts · proj {round1(p.expectedFinalPoints)}</span>
               </div>
-              <div className="row-progress" style={{ width: `${ptPct}%` }} />
-            </div>
+              <span className="odds-pct">
+                {Math.round(p.pFirst * 100)}<span className="odds-pct-sign">%</span>
+                <span className="odds-se">±{(se * 100).toFixed(1)}</span>
+              </span>
+            </button>
+            {isOpen && <OddsRoster player={p} />}
+          </div>
+        );
+      })}
 
-            {isOpen && <PlayerExpand player={p} />}
+      <p className="odds-foot">
+        Chance of finishing 1st across {simLabel}. ± is the simulation margin of error.
+      </p>
+    </div>
+  );
+}
+
+function OddsRoster({ player: p }: { player: PlayerProjection }) {
+  const teams = [...p.teams].sort((a, b) => b.expectedFinalPoints - a.expectedFinalPoints);
+  return (
+    <div className="odds-roster">
+      {teams.map((t) => {
+        const played = t.w + t.d + t.l;
+        const record = played > 0 ? `${t.w}-${t.d}-${t.l}` : "—";
+        const out = !isAlive(t.expectedRemainingWins);
+        return (
+          <div className={`roster-team${out ? " out" : ""}`} key={t.team}>
+            <span className="roster-flag">{flag(t.team)}</span>
+            <span className="roster-name">{t.team}</span>
+            <span className="roster-rec">{record}</span>
+            <span className="roster-pts">{t.currentPoints}</span>
           </div>
         );
       })}
@@ -432,196 +388,164 @@ function TableTab({ players, fixtures }: { players: PlayerProjection[]; fixtures
   );
 }
 
-function PlayerExpand({ player: p }: { player: PlayerProjection }) {
-  const sorted = [...p.teams].sort((a, b) => b.currentPoints - a.currentPoints);
-  const color = playerColor(p.player);
+/* ============================================================
+   INSIGHTS TAB — today's swings + per-player factors
+   ============================================================ */
+function InsightsTab({ players, fixtures, playerFactors }: {
+  players: PlayerProjection[];
+  fixtures: FixtureProjection[];
+  playerFactors: PlayerFactors[];
+}) {
+  const ranked = useMemo(() => [...players].sort((a, b) => b.pFirst - a.pFirst), [players]);
+  const [who, setWho] = useState<string>(ranked[0]?.player ?? "");
+
+  // Today's games (or the next match day if none), ranked by title swing.
+  const { dayLabel, games } = useMemo(() => {
+    const now = new Date();
+    const withK = fixtures.filter((f) => f.kickoff);
+    const today = withK.filter((f) => sameDay(new Date(f.kickoff!), now));
+    if (today.length > 0) {
+      return { dayLabel: "Today", games: [...today].sort((a, b) => b.swing - a.swing) };
+    }
+    const future = withK
+      .filter((f) => new Date(f.kickoff!).getTime() > now.getTime())
+      .sort((a, b) => new Date(a.kickoff!).getTime() - new Date(b.kickoff!).getTime());
+    if (future.length === 0) return { dayLabel: "", games: [] as FixtureProjection[] };
+    const nextDay = new Date(future[0].kickoff!);
+    const sameNext = future.filter((f) => sameDay(new Date(f.kickoff!), nextDay));
+    const label = nextDay.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+    return { dayLabel: `Next · ${label}`, games: sameNext.sort((a, b) => b.swing - a.swing) };
+  }, [fixtures]);
+
+  const selFactors = useMemo(
+    () => playerFactors.find((x) => x.player === who)?.factors ?? [],
+    [playerFactors, who]
+  );
+  const boosts = selFactors.filter((f) => f.pYes >= f.pNo);
+  const risks = selFactors.filter((f) => f.pYes < f.pNo);
+
   return (
-    <div className="standing-expand">
-      <div className="expand-teams">
-        {sorted.map((t) => {
-          const played = t.w + t.d + t.l;
-          const record = played > 0 ? `${t.w}W ${t.d}D ${t.l}L` : "—";
-          return (
-            <div className="expand-team" key={t.team}>
-              <span className="et-left">
-                <span className="et-flag">{flag(t.team)}</span>
-                <span className="et-name">{t.team}</span>
-              </span>
-              <span className="et-record">{record}</span>
-              <span className={`et-pts${t.currentPoints === 0 ? " zero" : ""}`}
-                style={t.currentPoints > 0 ? { color } : undefined}>
-                {t.currentPoints}
-              </span>
-            </div>
-          );
-        })}
+    <div className="insights-wrap">
+
+      {/* Today's biggest swings */}
+      <div className="insight-section">
+        <div className="insight-header">
+          <span className="insight-title">{dayLabel || "Upcoming"}</span>
+          <span className="insight-subtitle">biggest swings</span>
+        </div>
+        {games.length === 0
+          ? <p className="insight-note">No upcoming games with odds.</p>
+          : games.slice(0, 6).map((f) => <TodaySwing key={f.id} f={f} />)}
+      </div>
+
+      {/* Per-player tournament factors */}
+      <div className="insight-section">
+        <div className="insight-header">
+          <span className="insight-title">What Moves the Needle</span>
+          <span className="insight-subtitle">rest of tournament</span>
+        </div>
+
+        <div className="who-chips">
+          {ranked.map((p) => (
+            <button key={p.player}
+              className={`who-chip${who === p.player ? " active" : ""}`}
+              onClick={() => setWho(p.player)}>
+              {displayName(p.player)}
+            </button>
+          ))}
+        </div>
+
+        {selFactors.length === 0 ? (
+          <p className="insight-note">Odds are largely settled — no high-variance swings left.</p>
+        ) : (
+          <>
+            {boosts.length > 0 && (
+              <div className="factor-group">
+                <div className="factor-group-head up">Upside</div>
+                {boosts.map((f) => <FactorRow key={f.team + f.stage} f={f} />)}
+              </div>
+            )}
+            {risks.length > 0 && (
+              <div className="factor-group">
+                <div className="factor-group-head down">Risks</div>
+                {risks.map((f) => <FactorRow key={f.team + f.stage} f={f} />)}
+              </div>
+            )}
+            <p className="insight-note small">
+              {displayName(who)}&apos;s title odds without → with each event. Only swings likely
+              enough to matter are shown.
+            </p>
+          </>
+        )}
+      </div>
+
+      <MethodologyNote />
+    </div>
+  );
+}
+
+// One of today's games: the most-affected player's raw before/after odds.
+function TodaySwing({ f }: { f: FixtureProjection }) {
+  const d = f.kickoff ? new Date(f.kickoff) : null;
+  const time = d ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "";
+  const ps = (f.playerSwings ?? [])[0]; // pre-sorted by |pHome − pAway|
+  const homeHigher = ps ? ps.pHome >= ps.pAway : true;
+  const hi = ps ? Math.max(ps.pHome, ps.pAway) : 0;
+  const lo = ps ? Math.min(ps.pHome, ps.pAway) : 0;
+  const goodTeam = homeHigher ? f.home : f.away;
+  return (
+    <div className="today-row">
+      <div className="today-match">
+        <span className="today-teams">{flag(f.home)} {f.home} <span className="today-v">v</span> {f.away} {flag(f.away)}</span>
+        <span className="today-time">{time}</span>
+      </div>
+      {ps && f.swing > 0.005 ? (
+        <div className="today-swing">
+          <strong>{displayName(ps.player)}</strong>
+          <span className="today-prob">{Math.round(lo * 100)}% → {Math.round(hi * 100)}%</span>
+          <span className="today-if">if {goodTeam} {flag(goodTeam)} win</span>
+        </div>
+      ) : (
+        <div className="today-swing muted">little title impact</div>
+      )}
+    </div>
+  );
+}
+
+// One tournament factor row: event, its likelihood, and the player's odds shift.
+function FactorRow({ f }: { f: TournamentFactor }) {
+  const up = f.pYes >= f.pNo;
+  return (
+    <div className="factor-row">
+      <span className="factor-flag">{flag(f.team)}</span>
+      <div className="factor-mid">
+        <div className="factor-label">{f.label}</div>
+        <div className="factor-prob">{Math.round(f.prob * 100)}% likely</div>
+      </div>
+      <div className={`factor-delta ${up ? "up" : "down"}`}>
+        <span className="fd-from">{Math.round(f.pNo * 100)}%</span>
+        <span className="fd-arrow">{up ? "↑" : "↓"}</span>
+        <span className="fd-to">{Math.round(f.pYes * 100)}%</span>
       </div>
     </div>
   );
 }
 
-/* ============================================================
-   INSIGHTS TAB
-   ============================================================ */
-function InsightsTab({ players, fixtures }: { players: PlayerProjection[]; fixtures: FixtureProjection[] }) {
-  const sorted = useMemo(
-    () => [...players].sort((a, b) => b.pFirst - a.pFirst),
-    [players]
-  );
-  const maxWin = Math.max(...sorted.map((p) => p.pFirst), 0.01);
-  const topSwing = useMemo(
-    () => [...fixtures].filter((f) => f.swing > 0).sort((a, b) => b.swing - a.swing).slice(0, 5),
-    [fixtures]
-  );
-  const byPts = useMemo(
-    () => [...players].sort((a, b) => b.currentPoints - a.currentPoints),
-    [players]
-  );
-  const maxProj = Math.max(...players.map((p) => p.expectedFinalPoints), 1);
-
+// Plain-language model summary so the numbers are interpretable.
+function MethodologyNote() {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="insights-wrap">
-
-      {/* Win probability */}
-      <div className="insight-section">
-        <div className="insight-header">
-          <span className="insight-title">Win Probability</span>
-          <span className="insight-subtitle">Monte Carlo · {players[0]?.finishDistribution ? "5k sims" : ""}</span>
-        </div>
-        {sorted.map((p, i) => (
-          <div className="win-row" key={p.player}>
-            <div className="win-row-top">
-              <span className="win-name">{displayName(p.player)}</span>
-              <span className="win-pct" style={{ color: i === 0 ? "var(--green)" : "var(--t1)" }}>
-                {pct(p.pFirst)}
-              </span>
-            </div>
-            <div className="win-bar-track">
-              <div
-                className="win-bar-fill"
-                style={{
-                  width: `${(p.pFirst / maxWin) * 100}%`,
-                  background: i === 0 ? "var(--green)" : playerColor(p.player),
-                  opacity: i === 0 ? 1 : 0.7,
-                }}
-              />
-            </div>
-            <div className="win-sub">
-              <span>Top 3: {pct(p.pTop3)}</span>
-              <span>Proj: {round1(p.expectedFinalPoints)} pts</span>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Projected final standings */}
-      <div className="insight-section">
-        <div className="insight-header">
-          <span className="insight-title">Projected Final Points</span>
-          <span className="insight-subtitle">Expected wins × 3 pts</span>
-        </div>
-        {byPts.map((p) => (
-          <div className="proj-row" key={p.player}>
-            <span className="proj-name">{displayName(p.player)}</span>
-            <div className="proj-bars">
-              <div className="proj-current-bar" style={{
-                width: `${(p.currentPoints / maxProj) * 100}%`,
-                background: playerColor(p.player),
-              }} />
-              <div className="proj-expected-bar" style={{
-                width: `${((p.expectedFinalPoints - p.currentPoints) / maxProj) * 100}%`,
-                background: playerColor(p.player),
-                opacity: 0.25,
-              }} />
-            </div>
-            <div className="proj-nums">
-              <span className="proj-cur">{p.currentPoints}</span>
-              <span className="proj-arrow">→</span>
-              <span className="proj-exp">{round1(p.expectedFinalPoints)}</span>
-            </div>
-          </div>
-        ))}
-        <div className="proj-legend">
-          <span className="legend-solid" /> Earned &nbsp;
-          <span className="legend-dim" /> Projected
-        </div>
-      </div>
-
-      {/* Key matches */}
-      {topSwing.length > 0 && (
-        <div className="insight-section">
-          <div className="insight-header">
-            <span className="insight-title">Most Impactful Matches</span>
-            <span className="insight-subtitle">Swing = max title-odds shift</span>
-          </div>
-          {topSwing.map((f) => {
-            const d = f.kickoff ? new Date(f.kickoff) : null;
-            const timeLabel = d
-              ? d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
-                + " · " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
-              : "TBD";
-            const swingPct = Math.round(f.swing * 100);
-            const toward = f.swingToward === "home" ? f.home : f.swingToward === "away" ? f.away : null;
-            return (
-              <div className="swing-row" key={f.id}>
-                <div className="swing-matchup">
-                  <span>{flag(f.home)} {f.home}</span>
-                  <span className="swing-vs">vs</span>
-                  <span>{flag(f.away)} {f.away}</span>
-                </div>
-                <div className="swing-meta">
-                  <span className="swing-time">{timeLabel}</span>
-                  {f.swingPlayer && toward && (
-                    <span className="swing-note">
-                      <span style={{ color: playerColor(f.swingPlayer) }}>
-                        {displayName(f.swingPlayer)}
-                      </span>
-                      {" "}+{swingPct}% if {toward} wins
-                    </span>
-                  )}
-                </div>
-                <div className="swing-bar-track">
-                  <div className="swing-bar-fill" style={{ width: `${Math.min(swingPct * 2, 100)}%` }} />
-                </div>
-              </div>
-            );
-          })}
+    <div className="method-note">
+      <button className="method-toggle" onClick={() => setOpen((v) => !v)}>
+        <span>How these numbers work</span>
+        <span className="method-caret">{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div className="method-body">
+          <p>Score = <strong>3 points per match a team you own wins</strong>. We run thousands of simulated tournaments off live <strong>Kalshi market odds</strong> — group games and each team&apos;s knockout run.</p>
+          <p><strong>Odds</strong> = how often you finish 1st. A <strong>swing</strong> is how much one result moves those odds, from the same sims.</p>
         </div>
       )}
-
-      {/* Finish distribution */}
-      <div className="insight-section">
-        <div className="insight-header">
-          <span className="insight-title">Finish Distribution</span>
-          <span className="insight-subtitle">P(finish in each place)</span>
-        </div>
-        <div className="finish-grid">
-          {byPts.map((p) => (
-            <div className="finish-player" key={p.player}>
-              <div className="finish-name">{displayName(p.player)}</div>
-              <div className="finish-bars">
-                {p.finishDistribution.map((prob, place) => (
-                  <div
-                    key={place}
-                    className="finish-bar"
-                    style={{
-                      height: `${Math.max(prob * 100 * 4, 2)}%`,
-                      background: place === 0 ? "var(--green)" : playerColor(p.player),
-                      opacity: place === 0 ? 1 : 0.6 - place * 0.05,
-                    }}
-                    title={`P(${place + 1}): ${pct(prob)}`}
-                  />
-                ))}
-              </div>
-              <div className="finish-label">
-                <span>1st</span>
-                <span>{p.finishDistribution.length}th</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
     </div>
   );
 }
