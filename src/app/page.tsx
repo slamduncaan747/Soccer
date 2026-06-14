@@ -101,17 +101,19 @@ export default function Page() {
             </span>
           )}
         </div>
-        {/* Feature 1: Status pills */}
         {data && (
           <div className="app-status-strip">
-            <div className={`status-pill${data.status.groupSource === "kalshi" ? " live" : ""}`}>
+            <div className={`status-pill${data.status.groupSource === "kalshi" ? " live" : " warn"}`}>
               <span className="pill-dot" />
-              {data.status.groupSource === "kalshi" ? "KALSHI" : "MOCK ODDS"}
+              {data.status.groupSource === "kalshi" ? "KALSHI ODDS" : "MOCK ODDS"}
             </div>
-            <div className={`status-pill${data.status.liveResults ? " live" : ""}`}>
+            <div className={`status-pill${data.status.liveResults ? " live" : " warn"}`}>
               <span className="pill-dot" />
-              {data.status.liveResults ? "LIVE DATA" : "NO LIVE"}
+              {data.status.liveResults ? "LIVE RESULTS" : "NO LIVE DATA"}
             </div>
+            {data.oddsSource === "mock" && (
+              <div className="status-pill warn mock-warn">⚠ SIMULATED DATA</div>
+            )}
           </div>
         )}
       </header>

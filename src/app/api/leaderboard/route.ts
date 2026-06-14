@@ -15,6 +15,7 @@ export async function GET(req: Request) {
     const result = await buildProjection({ iterations, forceMock });
     return NextResponse.json(result);
   } catch (e) {
+    console.error("[leaderboard] buildProjection threw:", e);
     return NextResponse.json(
       { error: "projection_failed", message: String(e) },
       { status: 500 }

@@ -95,4 +95,6 @@ export interface ProjectionResult {
   iterations: number;
   generatedAt: string;
   oddsSource: "kalshi" | "mock" | "mixed";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  debug?: Record<string, unknown>;
 }
