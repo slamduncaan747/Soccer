@@ -7,7 +7,7 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const iterations = Math.min(
     200000,
-    Math.max(1000, Number(url.searchParams.get("iterations")) || 50000)
+    Math.max(1000, Number(url.searchParams.get("iterations")) || 20000)
   );
   const forceMock = url.searchParams.get("mock") === "1";
 

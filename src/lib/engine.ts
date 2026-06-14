@@ -108,7 +108,7 @@ function groupExpectedWins(team: string, fixtures: GroupFixture[]): number {
 }
 
 export function runProjection(input: EngineInput): ProjectionResult {
-  const iterations = input.iterations ?? 50000;
+  const iterations = input.iterations ?? 20000;
   const rng = mulberry32(input.seed ?? 0xC0FFEE);
   const teams = buildTeamRuntime(input);
   const teamByName = new Map(teams.map((t) => [t.name, t]));
@@ -268,42 +268,49 @@ export function runProjection(input: EngineInput): ProjectionResult {
     }
   }
 
-  // ---- Resolve per-fixture swing from the conditional first-place rates -----
-  // swing[player] = P(player wins pool | this fixture was a home win)
-  //               − P(...| away win). Because each fixture's outcome is drawn
-  // independently of all others, this conditional contrast is the causal effect
-  // of the result on that player's title odds. The two conditional rates are
-  // estimated from DISJOINT iteration buckets (home-win iters vs away-win iters),
-  // so the contrast's variance is the sum of two binomial-proportion variances —
-  // small for coin-flip games, large for lopsided ones where one bucket is thin.
+  // ---- Resolve per-fixture swing as a RAW BOOST over the baseline -----------
+  // The number people actually want to read: "if <team> wins, does my overall
+  // chance of winning the pool go UP, and by how much?" For each result we have
+  //   pBase[i]  = P(player i wins pool)            — the unconditional baseline
+  //   pIfHome   = P(player i wins pool | home win) — conditional on this result
+  //   pIfAway   = P(player i wins pool | away win)
+  // and the boost a result delivers is the conditional minus the baseline. This
+  // is correct precisely because the baseline already prices the result in at its
+  // market probability: a heavy favourite winning (expected) barely lifts the
+  // baseline, while an upset moves it a lot. We headline the single (player,
+  // result) pair with the largest positive boost.
+  const baseFirst = players.map((_, i) => firstTotal[i] / iterations);
   const fixtureProjections: FixtureProjection[] = oddFixtures.map((f, fi) => {
     const base = fi * P;
     const nH = homeN[fi];
     const nA = awayN[fi];
-    let best = 0;
+    let best = 0;            // largest positive boost found
     let bestSE = 0;
     let bestPlayer: string | undefined;
     let toward: "home" | "away" | undefined;
-    // Raw conditional title odds per player: P(win pool | home win) and | away win.
-    const playerSwings: { player: string; pHome: number; pAway: number }[] = [];
-    if (nH > 0 && nA > 0) {
-      for (let i = 0; i < P; i++) {
+    let bestBase = 0;
+    let bestTo = 0;
+    for (let i = 0; i < P; i++) {
+      const pb = baseFirst[i];
+      if (nH > 0) {
         const pHome = homeFirst[base + i] / nH;
+        const boost = pHome - pb;
+        if (boost > best) {
+          best = boost; bestPlayer = players[i]; toward = "home";
+          bestBase = pb; bestTo = pHome;
+          bestSE = Math.sqrt((pHome * (1 - pHome)) / nH);
+        }
+      }
+      if (nA > 0) {
         const pAway = awayFirst[base + i] / nA;
-        playerSwings.push({ player: players[i], pHome: round4(pHome), pAway: round4(pAway) });
-        const d = Math.abs(pHome - pAway);
-        if (d > best) {
-          best = d;
-          // SE of the difference of two independent binomial proportions.
-          bestSE = Math.sqrt(
-            (pHome * (1 - pHome)) / nH + (pAway * (1 - pAway)) / nA
-          );
-          bestPlayer = players[i];
-          toward = pHome > pAway ? "home" : "away";
+        const boost = pAway - pb;
+        if (boost > best) {
+          best = boost; bestPlayer = players[i]; toward = "away";
+          bestBase = pb; bestTo = pAway;
+          bestSE = Math.sqrt((pAway * (1 - pAway)) / nA);
         }
       }
     }
-    playerSwings.sort((a, b) => Math.abs(b.pHome - b.pAway) - Math.abs(a.pHome - a.pAway));
     return {
       id: f.id,
       home: f.home,
@@ -316,7 +323,8 @@ export function runProjection(input: EngineInput): ProjectionResult {
       swingSE: round4(bestSE),
       swingPlayer: bestPlayer,
       swingToward: toward,
-      playerSwings,
+      swingBase: round4(bestBase),
+      swingTo: round4(bestTo),
     };
   });
   fixtureProjections.sort((a, b) => b.swing - a.swing);
@@ -343,6 +351,7 @@ export function runProjection(input: EngineInput): ProjectionResult {
   const reachStages = KNOCKOUT_STAGES; // r32 … champion (levels 1..6)
   const playerFactors = players.map((p, pi) => {
     const total = firstTotal[pi];
+    const pBase = total / iterations; // this player's unconditional title odds
     const perTeam: TournamentFactor[] = [];
     for (let ti = 0; ti < T; ti++) {
       // suffix sums: nAtLeast[L] = iters where team reached at least level L,
@@ -377,6 +386,7 @@ export function runProjection(input: EngineInput): ProjectionResult {
             stage,
             label: `${teams[ti].name} ${stageVerb[stage]}`,
             prob: round4(q),
+            pBase: round4(pBase),
             pYes: round4(pYes),
             pNo: round4(pNo),
             impact: round4(Math.sqrt(ev)),
@@ -388,8 +398,8 @@ export function runProjection(input: EngineInput): ProjectionResult {
     perTeam.sort((a, b) => b.impact - a.impact);
     // Surface both upside (a team's run that HELPS this player — usually their own)
     // and downside (a rival's run that HURTS), so the picture isn't all good news.
-    const boosts = perTeam.filter((f) => f.pYes >= f.pNo).slice(0, 4);
-    const risks = perTeam.filter((f) => f.pYes < f.pNo).slice(0, 2);
+    const boosts = perTeam.filter((f) => f.pYes >= f.pBase).slice(0, 4);
+    const risks = perTeam.filter((f) => f.pYes < f.pBase).slice(0, 2);
     const factors = [...boosts, ...risks].sort((a, b) => b.impact - a.impact);
     return { player: p, factors };
   });
@@ -415,6 +425,7 @@ export function runProjection(input: EngineInput): ProjectionResult {
   return {
     players: playerProjections,
     fixtures: fixtureProjections,
+    pastFixtures: [], // filled by the orchestrator, which has the played schedule
     playerFactors,
     status: {
       // Sources are filled in by the orchestrator, which knows the real feed

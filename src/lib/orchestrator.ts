@@ -1,9 +1,9 @@
-import { ALL_TEAMS } from "../data/pool";
+import { ALL_TEAMS, TEAM_OWNER } from "../data/pool";
 import { fetchAllWCMatches, mergeRecords } from "./footballData";
 import { fetchGroupFixtures, fetchKnockoutOdds } from "./kalshi";
 import { mockGroupFixtures, mockKnockoutOdds } from "./mockOdds";
 import { runProjection } from "./engine";
-import { GroupFixture, ProjectionResult } from "./types";
+import { FixtureProjection, GroupFixture, ProjectionResult } from "./types";
 
 export interface ProjectOptions {
   iterations?: number;
@@ -11,7 +11,7 @@ export interface ProjectOptions {
 }
 
 export async function buildProjection(opts: ProjectOptions = {}): Promise<ProjectionResult> {
-  const iterations = opts.iterations ?? 50000;
+  const iterations = opts.iterations ?? 20000;
   const useMock = opts.forceMock ?? false;
 
   // ── 1) Single football-data.org call for everything ───────────
@@ -122,6 +122,26 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
       };
     });
   }
+
+  // ── 5b) Past (already-played) matches with final scores ───────
+  // The engine only projects REMAINING fixtures, so finished matches never reach
+  // it. Build them straight from the FD schedule so the Games tab can show
+  // results, not just upcoming kickoffs.
+  result.pastFixtures = (fdSchedule ?? [])
+    .filter((m) => m.status === "FINISHED")
+    .map((m): FixtureProjection => ({
+      id: `past-${m.id}`,
+      home: m.home,
+      away: m.away,
+      homeOwner: TEAM_OWNER[m.home] ?? "—",
+      awayOwner: TEAM_OWNER[m.away] ?? "—",
+      kickoff: m.kickoff,
+      final: { home: m.scoreHome ?? 0, away: m.scoreAway ?? 0 },
+      swing: 0,
+    }))
+    .sort((a, b) =>
+      new Date(b.kickoff ?? 0).getTime() - new Date(a.kickoff ?? 0).getTime()
+    );
 
   // ── 6) Debug info (visible in /api/leaderboard response) ──────
   result.debug = {

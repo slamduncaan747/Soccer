@@ -565,6 +565,18 @@ body {
   line-height: 1;
 }
 
+/* Played (finished) matches */
+.match-card.is-past { cursor: default; }
+.mc-score-final {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+  color: var(--t1);
+  line-height: 1;
+}
+.mc-name.lost { color: var(--t3); font-weight: 600; }
+
 /* ──────────────────────────────────────
    LIVE DELTA CHIP
 ────────────────────────────────────── */
@@ -749,5 +761,6 @@ body {
 .factor-delta { display: flex; align-items: baseline; gap: 5px; font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .fd-from { color: var(--t2); }
 .fd-arrow { font-size: 11px; }
-.factor-delta.up .fd-to, .factor-delta.up .fd-arrow { color: var(--green); }
-.factor-delta.down .fd-to, .factor-delta.down .fd-arrow { color: #d9706b; }
+.fd-net { font-size: 11px; font-weight: 700; }
+.factor-delta.up .fd-to, .factor-delta.up .fd-arrow, .factor-delta.up .fd-net { color: var(--green); }
+.factor-delta.down .fd-to, .factor-delta.down .fd-arrow, .factor-delta.down .fd-net { color: #d9706b; }

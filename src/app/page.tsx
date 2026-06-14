@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectionResult, PlayerProjection, FixtureProjection, PlayerFactors, TournamentFactor } from "@/lib/types";
 
-type Tab = "matches" | "odds" | "insights";
+type Tab = "games" | "standings" | "odds" | "insights";
 
 const DISPLAY_NAME: Record<string, string> = { Isiah: "Zeke" };
 const displayName = (name: string) => DISPLAY_NAME[name] ?? name;
@@ -70,12 +70,12 @@ function liveMinute(kickoff: string): number {
 export default function Page() {
   const [data, setData]       = useState<ProjectionResult | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab]         = useState<Tab>("matches");
+  const [tab, setTab]         = useState<Tab>("games");
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/leaderboard?iterations=5000", { cache: "no-store" });
+      const res = await fetch("/api/leaderboard?iterations=20000", { cache: "no-store" });
       setData((await res.json()) as ProjectionResult);
     } catch {
       setData(null);
@@ -119,16 +119,20 @@ export default function Page() {
           </div>
         ) : (
           <div className="tab-pane" key={tab}>
-            {tab === "matches"  && <MatchesTab fixtures={data.fixtures} />}
-            {tab === "odds"     && <OddsTab players={data.players} iterations={data.iterations} />}
-            {tab === "insights" && <InsightsTab players={data.players} fixtures={data.fixtures} playerFactors={data.playerFactors} />}
+            {tab === "games"     && <MatchesTab fixtures={data.fixtures} past={data.pastFixtures ?? []} />}
+            {tab === "standings" && <StandingsTab players={data.players} />}
+            {tab === "odds"      && <OddsTab players={data.players} iterations={data.iterations} />}
+            {tab === "insights"  && <InsightsTab players={data.players} fixtures={data.fixtures} playerFactors={data.playerFactors} />}
           </div>
         )}
       </main>
 
       <nav className="tab-bar" aria-label="Sections">
-        <button className={`tab-btn ${tab === "matches" ? "active" : ""}`} onClick={() => setTab("matches")}>
-          <CalendarIcon /> Matches
+        <button className={`tab-btn ${tab === "games" ? "active" : ""}`} onClick={() => setTab("games")}>
+          <CalendarIcon /> Games
+        </button>
+        <button className={`tab-btn ${tab === "standings" ? "active" : ""}`} onClick={() => setTab("standings")}>
+          <StandingsIcon /> Standings
         </button>
         <button className={`tab-btn ${tab === "odds" ? "active" : ""}`} onClick={() => setTab("odds")}>
           <TableIcon /> Odds
@@ -144,8 +148,9 @@ export default function Page() {
 /* ============================================================
    MATCHES TAB
    ============================================================ */
-function MatchesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
-  const groups = useMemo(() => groupByDay(fixtures), [fixtures]);
+function MatchesTab({ fixtures, past }: { fixtures: FixtureProjection[]; past: FixtureProjection[] }) {
+  const all = useMemo(() => [...past, ...fixtures], [past, fixtures]);
+  const groups = useMemo(() => groupByDay(all), [all]);
   const todayKey = groups.find((g) => g.isToday)?.key ?? groups[0]?.key ?? null;
   const [selectedKey, setSelectedKey] = useState<string | null>(todayKey);
   // Feature 2: expanded card state
@@ -210,19 +215,25 @@ function MatchCard({
   const dp = odds ? Math.round(odds.draw * 100) : null;
   const ap = odds ? Math.round(odds.loss * 100) : null;
 
-  // Feature 3: live detection
-  const live = f.liveStatus != null ? f.liveStatus !== "FINISHED"
-    : isLiveByTime(f.kickoff);
+  // A played match carries a final score; a live one is in progress.
+  const isPast = f.final != null;
+  const live = !isPast && (f.liveStatus != null ? f.liveStatus !== "FINISHED"
+    : isLiveByTime(f.kickoff));
   const minute = live && f.kickoff
     ? (f.liveMinute ?? liveMinute(f.kickoff))
     : null;
+  const homeWon = isPast && f.final!.home > f.final!.away;
+  const awayWon = isPast && f.final!.away > f.final!.home;
 
   return (
-    <div className="match-card" onClick={onToggle}>
+    <div
+      className={`match-card${isPast ? " is-past" : ""}`}
+      onClick={isPast ? undefined : onToggle}
+    >
       <div className="match-card-teams">
         <div className="mc-team home">
           <span className="mc-flag">{flag(f.home)}</span>
-          <span className="mc-name">{f.home}</span>
+          <span className={`mc-name${isPast && !homeWon ? " lost" : ""}`}>{f.home}</span>
           <span className="mc-owner">{f.homeOwner}</span>
         </div>
         <div className="mc-center">
@@ -235,6 +246,11 @@ function MatchCard({
                 <span className="live-minute">{minute}&apos;</span>
               ) : null}
             </>
+          ) : isPast ? (
+            <>
+              <span className="mc-score-final">{f.final!.home}–{f.final!.away}</span>
+              <span className="mc-period">FT</span>
+            </>
           ) : (
             <>
               <span className="mc-time">{tVal}</span>
@@ -245,7 +261,7 @@ function MatchCard({
         </div>
         <div className="mc-team away">
           <span className="mc-flag">{flag(f.away)}</span>
-          <span className="mc-name">{f.away}</span>
+          <span className={`mc-name${isPast && !awayWon ? " lost" : ""}`}>{f.away}</span>
           <span className="mc-owner">{f.awayOwner}</span>
         </div>
       </div>
@@ -266,13 +282,15 @@ function MatchCard({
       {/* Feature 2: expanded preview */}
       {isExpanded && (
         <div className="match-preview">
-          {f.swingPlayer && f.swingToward && (
+          {f.swingPlayer && f.swingToward && f.swing > 0.005 && (
             <div className="preview-insight">
               <span className="preview-insight-icon">⚡</span>
               <span>
-                A <strong>{f.swingToward === "home" ? f.home : f.away}</strong> win gives{" "}
+                A <strong>{f.swingToward === "home" ? f.home : f.away}</strong> win lifts{" "}
                 <strong style={{ color: playerColor(f.swingPlayer) }}>{displayName(f.swingPlayer)}</strong>{" "}
-                the biggest title boost (+{Math.round(f.swing * 100)}% win prob)
+                from <strong>{Math.round((f.swingBase ?? 0) * 100)}%</strong> to{" "}
+                <strong>{Math.round((f.swingTo ?? 0) * 100)}%</strong> to win the pool
+                {" "}(+{Math.round(f.swing * 100)})
               </span>
             </div>
           )}
@@ -389,6 +407,93 @@ function OddsRoster({ player: p }: { player: PlayerProjection }) {
 }
 
 /* ============================================================
+   STANDINGS TAB — raw current pool standings (no projection)
+   ============================================================ */
+function StandingsTab({ players }: { players: PlayerProjection[] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const rows = useMemo(() => {
+    return [...players]
+      .map((p) => {
+        const wins = p.teams.reduce((s, t) => s + t.w, 0);
+        const draws = p.teams.reduce((s, t) => s + t.d, 0);
+        const losses = p.teams.reduce((s, t) => s + t.l, 0);
+        const played = wins + draws + losses;
+        return { p, wins, draws, losses, played };
+      })
+      .sort((a, b) => b.p.currentPoints - a.p.currentPoints || b.wins - a.wins);
+  }, [players]);
+
+  const maxPts = Math.max(...rows.map((r) => r.p.currentPoints), 1);
+
+  return (
+    <div className="standings-wrap">
+      <div className="standings-header">
+        <span className="sh-rank">#</span>
+        <span>Player</span>
+        <span className="sh-meta">Record</span>
+        <span className="sh-pts">Pts</span>
+      </div>
+
+      {rows.map((r, i) => {
+        const isOpen = open === r.p.player;
+        const isLeader = i === 0 && r.p.currentPoints > 0;
+        return (
+          <div key={r.p.player}>
+            <div
+              className={`standing-row${isLeader ? " leader" : ""}`}
+              onClick={() => setOpen(isOpen ? null : r.p.player)}
+            >
+              <span className="row-rank" style={{ color: playerColor(r.p.player) }}>{i + 1}</span>
+              <div className="row-info">
+                <div className="row-name">{displayName(r.p.player)}</div>
+              </div>
+              <div className="row-meta">
+                <div className="row-meta-stat">
+                  <span className="meta-val">{r.wins}-{r.draws}-{r.losses}</span>
+                </div>
+                <div className="row-meta-stat">
+                  <span className="meta-label">{r.played} played</span>
+                </div>
+              </div>
+              <div className="row-right">
+                <span className="row-pts">{r.p.currentPoints}</span>
+                <span className="row-pts-label">PTS</span>
+              </div>
+              <div className="row-progress" style={{ width: `${(r.p.currentPoints / maxPts) * 100}%` }} />
+            </div>
+            {isOpen && (
+              <div className="standing-expand">
+                <div className="expand-teams">
+                  {[...r.p.teams]
+                    .sort((a, b) => b.currentPoints - a.currentPoints || (b.w + b.d + b.l) - (a.w + a.d + a.l))
+                    .map((t) => {
+                      const played = t.w + t.d + t.l;
+                      return (
+                        <div className="expand-team" key={t.team}>
+                          <div className="et-left">
+                            <span className="et-flag">{flag(t.team)}</span>
+                            <span className="et-name">{t.team}</span>
+                          </div>
+                          <span className="et-record">{played > 0 ? `${t.w}-${t.d}-${t.l}` : "—"}</span>
+                          <span className={`et-pts${t.currentPoints === 0 ? " zero" : ""}`}>{t.currentPoints}</span>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <p className="odds-foot">
+        Current points only — 3 per win, draws and losses score 0. Tap a player to see each team&apos;s record.
+      </p>
+    </div>
+  );
+}
+
+/* ============================================================
    INSIGHTS TAB — today's swings + per-player factors
    ============================================================ */
 function InsightsTab({ players, fixtures, playerFactors }: {
@@ -421,8 +526,12 @@ function InsightsTab({ players, fixtures, playerFactors }: {
     () => playerFactors.find((x) => x.player === who)?.factors ?? [],
     [playerFactors, who]
   );
-  const boosts = selFactors.filter((f) => f.pYes >= f.pNo);
-  const risks = selFactors.filter((f) => f.pYes < f.pNo);
+  const selBase = useMemo(
+    () => ranked.find((p) => p.player === who)?.pFirst ?? 0,
+    [ranked, who]
+  );
+  const boosts = selFactors.filter((f) => f.pYes >= selBase);
+  const risks = selFactors.filter((f) => f.pYes < selBase);
 
   return (
     <div className="insights-wrap">
@@ -462,18 +571,18 @@ function InsightsTab({ players, fixtures, playerFactors }: {
             {boosts.length > 0 && (
               <div className="factor-group">
                 <div className="factor-group-head up">Upside</div>
-                {boosts.map((f) => <FactorRow key={f.team + f.stage} f={f} />)}
+                {boosts.map((f) => <FactorRow key={f.team + f.stage} f={f} base={selBase} />)}
               </div>
             )}
             {risks.length > 0 && (
               <div className="factor-group">
                 <div className="factor-group-head down">Risks</div>
-                {risks.map((f) => <FactorRow key={f.team + f.stage} f={f} />)}
+                {risks.map((f) => <FactorRow key={f.team + f.stage} f={f} base={selBase} />)}
               </div>
             )}
             <p className="insight-note small">
-              {displayName(who)}&apos;s title odds without → with each event. Only swings likely
-              enough to matter are shown.
+              {displayName(who)}&apos;s current title odds ({Math.round(selBase * 100)}%) → odds if
+              each event happens. The shift is the raw change to their chance of winning the pool.
             </p>
           </>
         )}
@@ -484,26 +593,26 @@ function InsightsTab({ players, fixtures, playerFactors }: {
   );
 }
 
-// One of today's games: the most-affected player's raw before/after odds.
+// One of today's games: the most-affected player's baseline → conditional odds.
+// The boost shown is the RAW addition to their overall chance of winning the pool
+// if the named result happens (conditional minus baseline).
 function TodaySwing({ f }: { f: FixtureProjection }) {
   const d = f.kickoff ? new Date(f.kickoff) : null;
   const time = d ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "";
-  const ps = (f.playerSwings ?? [])[0]; // pre-sorted by |pHome − pAway|
-  const homeHigher = ps ? ps.pHome >= ps.pAway : true;
-  const hi = ps ? Math.max(ps.pHome, ps.pAway) : 0;
-  const lo = ps ? Math.min(ps.pHome, ps.pAway) : 0;
-  const goodTeam = homeHigher ? f.home : f.away;
+  const goodTeam = f.swingToward === "away" ? f.away : f.home;
+  const base = f.swingBase ?? 0;
+  const to = f.swingTo ?? 0;
   return (
     <div className="today-row">
       <div className="today-match">
         <span className="today-teams">{flag(f.home)} {f.home} <span className="today-v">v</span> {f.away} {flag(f.away)}</span>
         <span className="today-time">{time}</span>
       </div>
-      {ps && f.swing > 0.005 ? (
+      {f.swingPlayer && f.swing > 0.005 ? (
         <div className="today-swing">
-          <strong>{displayName(ps.player)}</strong>
-          <span className="today-prob">{Math.round(lo * 100)}% → {Math.round(hi * 100)}%</span>
-          <span className="today-if">if {goodTeam} {flag(goodTeam)} win</span>
+          <strong>{displayName(f.swingPlayer)}</strong>
+          <span className="today-prob">{Math.round(base * 100)}% → {Math.round(to * 100)}%</span>
+          <span className="today-if">if {goodTeam} {flag(goodTeam)} win · +{Math.round(f.swing * 100)}</span>
         </div>
       ) : (
         <div className="today-swing muted">little title impact</div>
@@ -512,9 +621,11 @@ function TodaySwing({ f }: { f: FixtureProjection }) {
   );
 }
 
-// One tournament factor row: event, its likelihood, and the player's odds shift.
-function FactorRow({ f }: { f: TournamentFactor }) {
-  const up = f.pYes >= f.pNo;
+// One tournament factor row: event, its likelihood, and how it shifts the
+// player's OVERALL title odds (baseline → odds given the event happens).
+function FactorRow({ f, base }: { f: TournamentFactor; base: number }) {
+  const up = f.pYes >= base;
+  const delta = Math.round((f.pYes - base) * 100);
   return (
     <div className="factor-row">
       <span className="factor-flag">{flag(f.team)}</span>
@@ -523,9 +634,10 @@ function FactorRow({ f }: { f: TournamentFactor }) {
         <div className="factor-prob">{Math.round(f.prob * 100)}% likely</div>
       </div>
       <div className={`factor-delta ${up ? "up" : "down"}`}>
-        <span className="fd-from">{Math.round(f.pNo * 100)}%</span>
-        <span className="fd-arrow">{up ? "↑" : "↓"}</span>
+        <span className="fd-from">{Math.round(base * 100)}%</span>
+        <span className="fd-arrow">→</span>
         <span className="fd-to">{Math.round(f.pYes * 100)}%</span>
+        <span className="fd-net">{delta >= 0 ? `+${delta}` : delta}</span>
       </div>
     </div>
   );
@@ -565,6 +677,13 @@ function CalendarIcon() {
     </svg>
   );
 }
+function StandingsIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M5 21V11M12 21V4M19 21v-6" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+    </svg>
+  );
+}
 function TableIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -594,6 +713,12 @@ interface DayGroup {
   matches: FixtureProjection[];
 }
 
+function dayKey(d: Date): string {
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
 function groupByDay(fixtures: FixtureProjection[]): DayGroup[] {
   const now = new Date();
   const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -602,7 +727,7 @@ function groupByDay(fixtures: FixtureProjection[]): DayGroup[] {
   for (let offset = -2; offset <= 0; offset++) {
     const d = new Date(todayMidnight);
     d.setDate(todayMidnight.getDate() + offset);
-    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    const key = dayKey(d);
     const isToday = offset === 0;
     const shortLabel = offset === -2
       ? d.toLocaleDateString("en-US", { weekday: "short", day: "numeric" })
@@ -618,7 +743,7 @@ function groupByDay(fixtures: FixtureProjection[]): DayGroup[] {
 
   for (const f of sorted) {
     const d = f.kickoff ? new Date(f.kickoff) : null;
-    const key = d ? `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}` : "tbd";
+    const key = d ? dayKey(d) : "tbd";
     const isToday = d ? sameDay(d, now) : false;
 
     if (!d) {

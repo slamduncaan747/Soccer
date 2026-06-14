@@ -48,7 +48,7 @@ finish-place odds or handle ties/correlation).
   each gets 1/*g* credit per slot. This makes the finish-position probabilities
   exact — every player's distribution sums to 1, Σ P(1st) = 1, Σ P(top-3) = 3.
 
-50,000 iterations by default (`?iterations=` to override, capped at 200k).
+20,000 iterations by default (`?iterations=` to override, capped at 200k).
 
 ## Architecture
 

@@ -60,7 +60,7 @@ export interface PlayerProjection {
   teams: TeamProjection[];
 }
 
-// A single remaining group match, with its owners and a leverage score:
+// A single group match, with its owners and a leverage score:
 // how much its result swings the title race (computed from the same MC samples).
 export interface FixtureProjection {
   id: string;
@@ -70,15 +70,18 @@ export interface FixtureProjection {
   awayOwner: string;
   kickoff?: string; // ISO
   oddsHome?: ThreeWay;
-  // swing = max over players of |P(wins pool | home win) − P(wins pool | away win)|.
-  // The single most title-relevant number we can attach to a fixture.
+  // The single most title-relevant number we can attach to a fixture: the largest
+  // RAW boost any player gets from a single result — i.e. how much that player's
+  // overall chance of winning the pool *increases above its baseline* if the
+  // favoured side here wins. swing = swingTo − swingBase.
   swing: number;
-  swingSE?: number;              // Monte-Carlo standard error of `swing` (thin buckets ⇒ larger)
+  swingSE?: number;              // Monte-Carlo standard error of `swingTo`
   swingPlayer?: string;          // the player whose title odds move most on this result
-  swingToward?: "home" | "away"; // which result helps that player
-  // Per-player RAW conditional title odds for this fixture: P(win pool | home win)
-  // and P(win pool | away win). Lets the UI show "14% → 19%" rather than a delta.
-  playerSwings?: { player: string; pHome: number; pAway: number }[];
+  swingToward?: "home" | "away"; // which result delivers that player the boost
+  swingBase?: number;            // that player's overall (unconditional) title odds
+  swingTo?: number;              // that player's title odds GIVEN the swingToward result
+  // Final result, present only for matches that have already been played.
+  final?: { home: number; away: number };
   // Live match data (populated from football-data.org during active matches)
   liveStatus?: "IN_PLAY" | "PAUSED" | "HALFTIME" | "FINISHED";
   liveScore?: { home: number; away: number };
@@ -94,6 +97,7 @@ export interface TournamentFactor {
   stage: Stage;             // the reach threshold the event represents
   label: string;            // e.g. "Portugal reaches the Semifinal"
   prob: number;             // P(event happens)
+  pBase: number;            // P(viewing player wins pool) overall — the baseline
   pYes: number;             // P(viewing player wins pool | event happens)
   pNo: number;              // P(viewing player wins pool | event does NOT happen)
   impact: number;           // √(explained variance) — the ranking key
@@ -118,6 +122,7 @@ export interface DataStatus {
 export interface ProjectionResult {
   players: PlayerProjection[];
   fixtures: FixtureProjection[];    // remaining group matches, sorted by swing desc
+  pastFixtures: FixtureProjection[]; // already-played matches with final scores
   playerFactors: PlayerFactors[];   // per-player high-variance knockout what-ifs
   status: DataStatus;
   iterations: number;

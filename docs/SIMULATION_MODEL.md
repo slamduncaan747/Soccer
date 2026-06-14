@@ -118,7 +118,7 @@ Knockout draws are taken **independently across teams** (see §6, L1).
 
 ## 5. Monte Carlo procedure & outputs
 
-- **Iterations:** default 50,000 (configurable via `?iterations=`).
+- **Iterations:** default 20,000 (configurable via `?iterations=`).
 - **RNG:** `mulberry32`, seeded deterministically (default seed `0xC0FFEE`), so
   runs are **reproducible**. Independence across draws relies on the quality of
   this PRNG.
@@ -230,4 +230,4 @@ These are the points most worth a statistician's scrutiny.
   probabilities to outcomes (Brier score / reliability curve) to test L3.
 - **Sensitivity:** re-run with `final` mapped to reach-final vs champion (L2) and
   with an alternative de-vig method (L3) to bound model risk.
-- **Convergence:** confirm `pFirst` is stable across seeds at N = 50,000.
+- **Convergence:** confirm `pFirst` is stable across seeds at N = 20,000.
