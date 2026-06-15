@@ -1,12 +1,11 @@
 // SCORING — single source of truth for the pool's points rule.
 //
-// The user confirmed 3 / 0 / 0 (win only). Their seed sheet shows draw totals
-// as if draws scored 1, so the seed standings won't reproduce under this rule;
-// going forward, points are computed strictly from POINTS below. To switch the
-// rule (e.g. give draws a point), change this object and nothing else.
+// Rule: 3 points per win, 1 point per draw, 0 for a loss. A draw credits BOTH
+// teams in the fixture. Points are computed strictly from POINTS below; to
+// change the rule, change this object and nothing else.
 export const POINTS = {
   win: 3,
-  draw: 0,
+  draw: 1,
   loss: 0,
 } as const;
 

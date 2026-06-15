@@ -1,9 +1,10 @@
-import { ALL_TEAMS } from "../data/pool";
-import { fetchAllWCMatches, mergeRecords } from "./footballData";
+import { ALL_TEAMS, TEAM_OWNER } from "../data/pool";
+import { fetchAllWCMatches, mergeRecords, ScheduledMatch } from "./footballData";
 import { fetchGroupFixtures, fetchKnockoutOdds } from "./kalshi";
 import { mockGroupFixtures, mockKnockoutOdds } from "./mockOdds";
 import { runProjection } from "./engine";
-import { GroupFixture, ProjectionResult } from "./types";
+import { GroupFixture, ProjectionResult, FixtureProjection } from "./types";
+import { snapshotOdds, readOddsHistory } from "./supabase";
 
 export interface ProjectOptions {
   iterations?: number;
@@ -15,12 +16,10 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
   const useMock = opts.forceMock ?? false;
 
   // ── 1) Single football-data.org call for everything ───────────
-  // One request → schedule (kickoff times) + W/D/L records + live scores.
   const fdData = useMock ? null : await fetchAllWCMatches();
-
   const records = mergeRecords(ALL_TEAMS, fdData?.records ?? null);
 
-  // ── 2) Kalshi odds (separate API, no auth needed) ──────────────
+  // ── 2) Kalshi odds ─────────────────────────────────────────────
   let kalshiGroup: GroupFixture[] | null = null;
   let kalshiKOResult: Awaited<ReturnType<typeof fetchKnockoutOdds>> | null = null;
 
@@ -33,17 +32,12 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
     if (koResult.ok) kalshiKOResult = koResult;
   }
 
-  // ── 3) Build group fixtures ────────────────────────────────────
-  // Use FD schedule as the fixture source (real kickoff times).
-  // Overlay Kalshi odds where available. Fall back to mock only when
-  // both sources are absent.
+  // ── 3) Build group fixtures for simulation (unfinished only) ──
   let groupFixtures: GroupFixture[];
   let groupSource: "kalshi" | "mock" = "mock";
-
   const fdSchedule = fdData?.schedule ?? null;
 
   if (fdSchedule && fdSchedule.length > 0) {
-    // Build a lookup from Kalshi odds by team pair
     const kalshiMap = new Map<string, GroupFixture>();
     for (const f of kalshiGroup ?? []) {
       kalshiMap.set(`${f.home}|${f.away}`, f);
@@ -53,30 +47,17 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
       .filter((m) => m.stage === "GROUP_STAGE")
       .filter((m) => !["FINISHED", "CANCELLED", "POSTPONED"].includes(m.status))
       .map((m) => {
-        // Try direct Kalshi match, then flipped (home/away may differ)
         const k = kalshiMap.get(`${m.home}|${m.away}`);
         const kFlip = !k ? kalshiMap.get(`${m.away}|${m.home}`) : null;
         let oddsHome = k?.oddsHome;
         if (!oddsHome && kFlip?.oddsHome) {
-          oddsHome = {
-            win: kFlip.oddsHome.loss,
-            draw: kFlip.oddsHome.draw,
-            loss: kFlip.oddsHome.win,
-          };
+          oddsHome = { win: kFlip.oddsHome.loss, draw: kFlip.oddsHome.draw, loss: kFlip.oddsHome.win };
         }
-        return {
-          id: `fd-${m.id}`,
-          home: m.home,
-          away: m.away,
-          kickoff: m.kickoff,
-          oddsHome,
-        };
+        return { id: `fd-${m.id}`, home: m.home, away: m.away, kickoff: m.kickoff, oddsHome };
       });
 
     if (kalshiGroup && kalshiGroup.length > 0) groupSource = "kalshi";
-    // else groupSource stays "mock" but fixtures come from FD — labelled honestly below
   } else if (kalshiGroup && kalshiGroup.length > 0) {
-    // No FD schedule but have Kalshi events (no kickoff times)
     groupFixtures = kalshiGroup;
     groupSource = "kalshi";
   } else {
@@ -107,7 +88,7 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
     knockoutTeams: knockoutOdds.length,
   };
 
-  // ── 5) Merge live scores into fixture projections ─────────────
+  // ── 5) Merge live scores into remaining fixture projections ────
   const liveScores = fdData?.liveScores ?? [];
   if (liveScores.length > 0) {
     const liveMap = new Map(liveScores.map((l) => [`${l.home}|${l.away}`, l]));
@@ -123,7 +104,51 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
     });
   }
 
-  // ── 6) Debug info (visible in /api/leaderboard response) ──────
+  // ── 6) Append finished matches for display ────────────────────
+  // The engine only received unfinished fixtures, so result.fixtures has
+  // no finished games yet. We add them here for the Games tab.
+  if (fdSchedule && fdSchedule.length > 0) {
+    const finished = fdSchedule.filter(
+      (m): m is ScheduledMatch & { scoreHome: number; scoreAway: number } =>
+        m.stage === "GROUP_STAGE" &&
+        m.status === "FINISHED" &&
+        m.scoreHome !== undefined &&
+        m.scoreAway !== undefined
+    );
+
+    const finishedProjections: FixtureProjection[] = finished.map((m) => ({
+      id: `fd-finished-${m.id}`,
+      home: m.home,
+      away: m.away,
+      homeOwner: TEAM_OWNER[m.home] ?? "?",
+      awayOwner: TEAM_OWNER[m.away] ?? "?",
+      kickoff: m.kickoff,
+      swing: 0,
+      liveStatus: "FINISHED",
+      liveScore: { home: m.scoreHome, away: m.scoreAway },
+    }));
+
+    result.fixtures = [...result.fixtures, ...finishedProjections];
+  }
+
+  // ── 7) Determine current matchday (max games played by any team) ─
+  const matchday = records.reduce((max, t) => Math.max(max, t.w + t.d + t.l), 0);
+
+  // ── 8) Snapshot odds to Supabase (fire-and-forget) ────────────
+  if (process.env.NEXT_PUBLIC_SUPABASE_URL && !useMock) {
+    snapshotOdds(result.players, matchday).catch((e) =>
+      console.error("[orchestrator] snapshotOdds error:", e)
+    );
+  }
+
+  // ── 9) Read odds history from Supabase ────────────────────────
+  let oddsHistory: ProjectionResult["oddsHistory"] = {};
+  if (process.env.NEXT_PUBLIC_SUPABASE_URL && !useMock) {
+    oddsHistory = await readOddsHistory(result.players.map((p) => p.player));
+  }
+  result.oddsHistory = oddsHistory;
+
+  // ── 10) Debug info ────────────────────────────────────────────
   result.debug = {
     footballDataToken: !!process.env.FOOTBALL_DATA_TOKEN,
     fdScheduleMatches: fdSchedule?.length ?? null,
@@ -135,6 +160,7 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
     groupFixturesWithOdds: fixturesWithOdds,
     groupSource,
     knockoutSource,
+    matchday,
   };
 
   return result;

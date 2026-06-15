@@ -115,14 +115,25 @@ export interface DataStatus {
   knockoutTeams: number;            // teams with knockout reach markets
 }
 
+// Per-player odds history for the chart.
+// Each entry is one snapshot in time: matchday = -1 means draft (synthetic equal odds),
+// matchday 0+ are actual stored snapshots.
+export interface OddsHistoryPoint {
+  matchday: number; // -1 = draft, 0 = start, 1 = after MD1, etc.
+  pct: number;      // 0–1 title odds
+}
+
 export interface ProjectionResult {
   players: PlayerProjection[];
-  fixtures: FixtureProjection[];    // remaining group matches, sorted by swing desc
+  fixtures: FixtureProjection[];    // all group matches (finished + remaining)
   playerFactors: PlayerFactors[];   // per-player high-variance knockout what-ifs
   status: DataStatus;
   iterations: number;
   generatedAt: string;
   oddsSource: "kalshi" | "mock" | "mixed";
+  // Per-player historical title odds, keyed by player name.
+  // Empty object when Supabase is unavailable.
+  oddsHistory: Record<string, OddsHistoryPoint[]>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   debug?: Record<string, unknown>;
 }

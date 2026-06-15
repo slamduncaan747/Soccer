@@ -27,7 +27,7 @@ body {
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  padding-bottom: calc(62px + env(safe-area-inset-bottom));
+  padding-bottom: calc(76px + env(safe-area-inset-bottom));
   overflow-x: hidden;
 }
 
@@ -107,13 +107,14 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr 1fr;
 }
+/* push page content up to clear the taller bar */
 .tab-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  height: 58px;
+  gap: 5px;
+  height: 72px;
   background: none;
   border: none;
   color: var(--dim);
@@ -388,12 +389,13 @@ body {
   line-height: 1;
 }
 
-/* odds bar */
+/* odds bar + inline labels */
+.mc-odds-wrap { margin-top: 10px; }
+
 .mc-odds-bar {
   display: flex;
-  gap: 3px;
+  gap: 2px;
   height: 5px;
-  margin-top: 10px;
 }
 .mc-odds-bar span {
   height: 100%;
@@ -403,26 +405,21 @@ body {
 .ob-draw { background: #3a414c; }
 .ob-away { background: #5d6675; }
 
-/* match footer */
-.mc-foot {
+/* percentage labels under bar — aligned to each segment */
+.mc-odds-labels {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  margin-top: 8px;
-  min-height: 13px;
+  margin-top: 5px;
 }
-.mc-swing {
-  font-family: 'Archivo', sans-serif;
-  font-weight: 800;
-  font-size: 11px;
-  color: var(--acc);
-}
-.mc-odl {
+.mc-odl-home, .mc-odl-draw, .mc-odl-away {
   font-family: 'JetBrains Mono', monospace;
-  font-weight: 500;
+  font-weight: 600;
   font-size: 10px;
-  color: var(--dim);
+  line-height: 1;
 }
+.mc-odl-home { color: var(--acc); text-align: left; }
+.mc-odl-draw { color: var(--dim); text-align: center; }
+.mc-odl-away { color: var(--mut); text-align: right; }
 
 /* done (finished) match */
 .match-card.done { opacity: 0.58; }

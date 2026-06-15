@@ -16,9 +16,11 @@ This document describes the model **as implemented**. Code references:
 
 - **6 players.** Each player owns **8 teams** (48 teams total — a partition of
   the full 48-team field, no team owned by two players).
-- **Scoring rule (`POINTS`):** a team earns **3 points per match won**, and
-  **0 for a draw or loss**, in *every* stage (group and knockout). A player's
-  score = 3 × (total matches won by their 8 teams).
+- **Scoring rule (`POINTS`):** a team earns **3 points per match won**, **1 for
+  a draw**, and **0 for a loss**. A drawn match credits **both** teams in it.
+  Knockout matches have no draws (advancement counts as a win), so draws arise
+  only in the group stage. A player's score = 3 × (total wins) + 1 × (total
+  draws) across their 8 teams.
 - The objective quantity, **P(win the pool)**, is the probability a player has
   the strictly-or-tied highest score at tournament end. Because that depends on
   the *joint* distribution of all six players' totals (including ties and the
@@ -74,7 +76,8 @@ champion must hold. This guards the conditional-probability step in §4.
 
 Each remaining group fixture with odds is a single **categorical draw** over
 {home win, draw, away win} using its de-vigged probabilities. A "win" outcome
-adds 3 points to the **owner of the winning team**; a draw adds nothing.
+adds 3 points to the **owner of the winning team**; a draw adds 1 point to the
+owners of **both** teams.
 
 Fixtures where **both** teams are pool teams are handled exactly: because one
 categorical outcome is drawn per fixture, the negative correlation between the

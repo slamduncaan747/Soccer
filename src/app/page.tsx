@@ -1,7 +1,7 @@
 "use client";
 
 import { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ProjectionResult, PlayerProjection, FixtureProjection, PlayerFactors, TournamentFactor } from "@/lib/types";
+import type { ProjectionResult, PlayerProjection, FixtureProjection, PlayerFactors, TournamentFactor, OddsHistoryPoint } from "@/lib/types";
 
 type Tab = "games" | "standings" | "odds" | "insights";
 
@@ -163,7 +163,7 @@ export default function Page() {
           <div className="tab-pane" key={tab}>
             {tab === "games"      && <GamesTab     fixtures={data.fixtures} />}
             {tab === "standings"  && <StandingsTab players={data.players} />}
-            {tab === "odds"       && <OddsTab      players={data.players} iterations={data.iterations} />}
+            {tab === "odds"       && <OddsTab      players={data.players} iterations={data.iterations} oddsHistory={data.oddsHistory} />}
             {tab === "insights"   && <InsightsTab  players={data.players} fixtures={data.fixtures} playerFactors={data.playerFactors} />}
           </div>
         )}
@@ -288,6 +288,7 @@ function MatchRow({ fixture: f }: { fixture: FixtureProjection }) {
   const hp = odds ? Math.round(odds.win * 100) : null;
   const dp = odds ? Math.round(odds.draw * 100) : null;
   const ap = odds ? Math.round(odds.loss * 100) : null;
+  const hasOdds = hp !== null && dp !== null && ap !== null;
 
   const finished = f.liveStatus === "FINISHED";
   const live = !finished && (f.liveStatus != null
@@ -295,10 +296,6 @@ function MatchRow({ fixture: f }: { fixture: FixtureProjection }) {
     : isLiveByTime(f.kickoff));
   const minute = live && f.kickoff
     ? (f.liveMinute ?? liveMinute(f.kickoff))
-    : null;
-
-  const swingPct = f.swing >= 0.03 && f.swingPlayer
-    ? Math.round(f.swing * 100)
     : null;
 
   return (
@@ -344,24 +341,19 @@ function MatchRow({ fixture: f }: { fixture: FixtureProjection }) {
         </div>
       </div>
 
-      {/* odds bar */}
-      {!finished && hp !== null && dp !== null && ap !== null && (
-        <div className="mc-odds-bar">
-          <span className="ob-home" style={{ width: `${hp}%` }} />
-          <span className="ob-draw" style={{ width: `${dp}%` }} />
-          <span className="ob-away" style={{ width: `${ap}%` }} />
-        </div>
-      )}
-
-      {/* footer: swing label + odds % */}
-      {!finished && (
-        <div className="mc-foot">
-          {swingPct && f.swingPlayer ? (
-            <span className="mc-swing">▲ {dn(f.swingPlayer)} +{swingPct}%</span>
-          ) : <span />}
-          {hp !== null && dp !== null && ap !== null && (
-            <span className="mc-odl">{hp} / {dp} / {ap}</span>
-          )}
+      {/* odds bar + inline percentage labels */}
+      {!finished && hasOdds && (
+        <div className="mc-odds-wrap">
+          <div className="mc-odds-bar">
+            <span className="ob-home" style={{ width: `${hp}%` }} />
+            <span className="ob-draw"  style={{ width: `${dp}%` }} />
+            <span className="ob-away"  style={{ width: `${ap}%` }} />
+          </div>
+          <div className="mc-odds-labels">
+            <span className="mc-odl-home">{hp}%</span>
+            <span className="mc-odl-draw">{dp}%</span>
+            <span className="mc-odl-away">{ap}%</span>
+          </div>
         </div>
       )}
     </div>
@@ -418,7 +410,7 @@ function StandingsTab({ players }: { players: PlayerProjection[] }) {
         })}
       </div>
       <p className="standings-foot">
-        3 pts per win · 0 for draw/loss · {players[0]?.teams.length ?? 8} teams each.
+        3 pts per win · 1 per draw · 0 for loss · {players[0]?.teams.length ?? 8} teams each.
         ALIVE = teams not yet eliminated.
       </p>
     </div>
@@ -434,9 +426,13 @@ const TIMELINE = ["Draft", "MD1", "MD2", "Now"];
 function xAt(i: number) { return PAD_X + (i / (TIMELINE.length - 1)) * (CHART_W - PAD_X * 2); }
 function yAt(v: number, mY: number) { return PAD_T + (1 - v / mY) * (CHART_H - PAD_T - PAD_B); }
 
-function OddsTab({ players, iterations }: { players: PlayerProjection[]; iterations: number }) {
+function OddsTab({ players, iterations, oddsHistory }: {
+  players: PlayerProjection[];
+  iterations: number;
+  oddsHistory: Record<string, OddsHistoryPoint[]>;
+}) {
   const [isolated, setIsolated] = useState<string | null>(null);
-  const [frame, setFrame] = useState({ idx: 3, isNow: true });
+  const [frame, setFrame] = useState({ idx: 999, isNow: true }); // 999 = clamp to lastIdx on first render
   const isDragging = useRef(false);
   const plotRef = useRef<HTMLDivElement>(null);
 
@@ -445,73 +441,123 @@ function OddsTab({ players, iterations }: { players: PlayerProjection[]; iterati
     [players]
   );
 
-  /* derive 4-point history: equal at Draft → actual pFirst at Now */
-  const history = useMemo<Record<string, number[]>>(() => {
+  // Use real Supabase history when available; fall back to linear interpolation.
+  // Either way, normalise to a flat number[] per player so the chart is uniform.
+  const { history, xLabels } = useMemo<{
+    history: Record<string, number[]>;
+    xLabels: string[];
+  }>(() => {
     const n = players.length || 6;
     const start = 1 / n;
-    return Object.fromEntries(
-      players.map((p) => {
-        const end = p.pFirst;
-        return [p.player, [
-          start,
-          start + (end - start) * (1 / 3),
-          start + (end - start) * (2 / 3),
-          end,
-        ]];
-      })
-    );
-  }, [players]);
+
+    // Check if we have at least 2 real data points for any player
+    const hasReal = Object.values(oddsHistory).some((pts) => pts.length >= 2);
+
+    if (hasReal) {
+      // Build a unified x-axis from all matchdays across all players
+      const allMDs = new Set<number>();
+      for (const pts of Object.values(oddsHistory)) {
+        for (const p of pts) allMDs.add(p.matchday);
+      }
+      const sortedMDs = [...allMDs].sort((a, b) => a - b);
+
+      // Always prepend draft (-1) if not already there
+      if (!sortedMDs.includes(-1)) sortedMDs.unshift(-1);
+      // Always append a "Now" point at the end if latest real != current
+      const mdLabels = sortedMDs.map((md) =>
+        md === -1 ? "Draft" : md === 0 ? "Start" : `MD${md}`
+      );
+      // Replace last label with "Now"
+      if (mdLabels.length > 0) mdLabels[mdLabels.length - 1] = "Now";
+
+      const hist: Record<string, number[]> = {};
+      for (const p of players) {
+        const pts = oddsHistory[p.player] ?? [];
+        const byMD = new Map(pts.map((pt) => [pt.matchday, pt.pct]));
+        hist[p.player] = sortedMDs.map((md) =>
+          md === -1 ? (byMD.get(-1) ?? start) : (byMD.get(md) ?? p.pFirst)
+        );
+        // Ensure last point = live pFirst
+        if (hist[p.player].length > 0) {
+          hist[p.player][hist[p.player].length - 1] = p.pFirst;
+        }
+      }
+      return { history: hist, xLabels: mdLabels };
+    }
+
+    // Fallback: linear interpolation Draft → Now (4 points)
+    const hist: Record<string, number[]> = {};
+    for (const p of players) {
+      const end = p.pFirst;
+      hist[p.player] = [
+        start,
+        start + (end - start) * (1 / 3),
+        start + (end - start) * (2 / 3),
+        end,
+      ];
+    }
+    return { history: hist, xLabels: ["Draft", "MD1", "MD2", "Now"] };
+  }, [players, oddsHistory]);
 
   const maxY = useMemo(
     () => Math.max(...Object.values(history).flatMap((arr) => arr)) * 1.08,
     [history]
   );
 
+  const lastIdx = xLabels.length - 1;
+
   const idxFromClientX = useCallback((clientX: number) => {
     const plot = plotRef.current;
-    if (!plot) return 3;
+    if (!plot) return lastIdx;
     const r = plot.getBoundingClientRect();
     const rel = ((clientX - r.left) / r.width) * CHART_W;
     let best = 0, bd = 1e9;
-    for (let i = 0; i < TIMELINE.length; i++) {
-      const d2 = Math.abs(rel - xAt(i));
+    for (let i = 0; i < xLabels.length; i++) {
+      const xPos = PAD_X + (i / Math.max(xLabels.length - 1, 1)) * (CHART_W - PAD_X * 2);
+      const d2 = Math.abs(rel - xPos);
       if (d2 < bd) { bd = d2; best = i; }
     }
     return best;
-  }, []);
+  }, [xLabels.length, lastIdx]);
+
+  // x coordinate for a given index (uses dynamic xLabels count)
+  const xAtIdx = useCallback((i: number) =>
+    PAD_X + (i / Math.max(xLabels.length - 1, 1)) * (CHART_W - PAD_X * 2),
+  [xLabels.length]);
 
   const handlePDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     isDragging.current = true;
     const idx = idxFromClientX(e.clientX);
-    setFrame({ idx, isNow: idx === 3 });
+    setFrame({ idx, isNow: idx === lastIdx });
     (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-  }, [idxFromClientX]);
+  }, [idxFromClientX, lastIdx]);
 
   const handlePMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (!isDragging.current) return;
     const idx = idxFromClientX(e.clientX);
-    setFrame({ idx, isNow: idx === 3 });
-  }, [idxFromClientX]);
+    setFrame({ idx, isNow: idx === lastIdx });
+  }, [idxFromClientX, lastIdx]);
 
   const handlePEnd = useCallback(() => {
     isDragging.current = false;
-    setFrame({ idx: 3, isNow: true });
-  }, []);
+    setFrame({ idx: lastIdx, isNow: true });
+  }, [lastIdx]);
 
   const handleMMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (isDragging.current) return;
     const idx = idxFromClientX(e.clientX);
-    setFrame({ idx, isNow: idx === 3 });
-  }, [idxFromClientX]);
+    setFrame({ idx, isNow: idx === lastIdx });
+  }, [idxFromClientX, lastIdx]);
 
   const handleMLeave = useCallback(() => {
     if (isDragging.current) return;
-    setFrame({ idx: 3, isNow: true });
-  }, []);
+    setFrame({ idx: lastIdx, isNow: true });
+  }, [lastIdx]);
 
   /* legend label: leader or isolated player value at current frame */
+  const frameIdx = Math.min(frame.idx, lastIdx);
   const labelPlayer = isolated ?? sorted[0]?.player;
-  const labelV = history[labelPlayer ?? ""]?.[frame.idx] ?? 0;
+  const labelV = history[labelPlayer ?? ""]?.[frameIdx] ?? 0;
 
   const gridLines = [0.1, 0.2, 0.3].filter((g) => g <= maxY);
 
@@ -525,7 +571,7 @@ function OddsTab({ players, iterations }: { players: PlayerProjection[]; iterati
             <span className="v3-chart-s">
               {frame.isNow
                 ? "Drag across · tap a name to isolate"
-                : `${TIMELINE[frame.idx]} — ${dn(labelPlayer ?? "")} ${Math.round(labelV * 100)}%`}
+                : `${xLabels[frameIdx] ?? ""} — ${dn(labelPlayer ?? "")} ${Math.round(labelV * 100)}%`}
             </span>
           </div>
           {frame.isNow && labelPlayer && (
@@ -570,7 +616,7 @@ function OddsTab({ players, iterations }: { players: PlayerProjection[]; iterati
             {sorted.map((p, i) => {
               const arr = history[p.player] ?? [];
               const d = arr.map((v, j) =>
-                `${j === 0 ? "M" : "L"}${xAt(j).toFixed(1)},${yAt(v, maxY).toFixed(1)}`
+                `${j === 0 ? "M" : "L"}${xAtIdx(j).toFixed(1)},${yAt(v, maxY).toFixed(1)}`
               ).join(" ");
               const isLead = i === 0;
               const isDim = isolated && isolated !== p.player;
@@ -589,17 +635,17 @@ function OddsTab({ players, iterations }: { players: PlayerProjection[]; iterati
             {!frame.isNow && (
               <>
                 <line
-                  x1={xAt(frame.idx)} y1={PAD_T}
-                  x2={xAt(frame.idx)} y2={CHART_H - PAD_B}
+                  x1={xAtIdx(frameIdx)} y1={PAD_T}
+                  x2={xAtIdx(frameIdx)} y2={CHART_H - PAD_B}
                   stroke="rgba(255,255,255,.5)" strokeWidth={1} strokeDasharray="3 3"
                 />
                 {sorted
                   .filter((p) => !isolated || isolated === p.player)
                   .map((p) => {
-                    const v = history[p.player]?.[frame.idx] ?? 0;
+                    const v = history[p.player]?.[frameIdx] ?? 0;
                     return (
                       <circle key={p.player}
-                        cx={xAt(frame.idx)} cy={yAt(v, maxY)}
+                        cx={xAtIdx(frameIdx)} cy={yAt(v, maxY)}
                         r={3.2} fill={playerColor(p.player)}
                         stroke="#000" strokeWidth={1}
                       />
@@ -616,7 +662,7 @@ function OddsTab({ players, iterations }: { players: PlayerProjection[]; iterati
               const isOn = isolated === p.player;
               return (
                 <circle key={p.player}
-                  cx={xAt(arr.length - 1)} cy={yAt(v, maxY)}
+                  cx={xAtIdx(arr.length - 1)} cy={yAt(v, maxY)}
                   r={isOn ? 4 : 3}
                   fill={playerColor(p.player)}
                   opacity={isDim ? 0.16 : 1}
@@ -627,7 +673,7 @@ function OddsTab({ players, iterations }: { players: PlayerProjection[]; iterati
         </div>
 
         <div className="v3-xaxis">
-          {TIMELINE.map((l) => <span key={l}>{l}</span>)}
+          {xLabels.map((l) => <span key={l}>{l}</span>)}
         </div>
       </div>
 
@@ -827,7 +873,7 @@ function MethodNote() {
       {open && (
         <div className="method-body">
           <p>
-            Score = <strong>3 points per match a team you own wins</strong>. We run thousands of
+            Score = <strong>3 points per match a team you own wins, 1 per draw</strong>. We run thousands of
             simulated tournaments off live <strong>Kalshi market odds</strong> — group games and
             each team&apos;s knockout run.
           </p>

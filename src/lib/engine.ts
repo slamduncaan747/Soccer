@@ -16,7 +16,8 @@ import { mulberry32 } from "./probability";
 // ---------------------------------------------------------------------------
 // MODEL
 //
-// A player's final score = 3 * (total team wins). Only wins score (POINTS rule).
+// A player's final score = 3 * (total team wins) + 1 * (total team draws), per
+// the POINTS rule; a drawn match credits BOTH teams in it.
 // "Win probability" = P(a player finishes 1st on the leaderboard). Because that
 // depends on the JOINT distribution of all six players' totals (with ties, and
 // with correlation when two owned teams meet), the statistically correct way to
@@ -26,7 +27,8 @@ import { mulberry32 } from "./probability";
 //
 //  GROUP STAGE — per-match 3-way (W/D/L) odds from Kalshi. Each unplayed group
 //  fixture is a categorical draw {home win, draw, away win}. A win adds POINTS.win
-//  to the owner of the winning team. Fixtures where both teams are pool teams are
+//  to the owner of the winning team; a draw adds POINTS.draw to BOTH teams'
+//  owners. Fixtures where both teams are pool teams are
 //  naturally correlated (one team's win is the other's loss) — the sim handles
 //  this exactly because it draws ONE outcome per fixture.
 //
@@ -55,6 +57,7 @@ interface TeamRuntime {
   name: string;
   owner: string;
   currentWins: number;
+  currentDraws: number;
   // sequential conditional win prob per knockout round (index aligned to KNOCKOUT_STAGES)
   condWin: number[];
   reachFirst: number; // P(reach the first knockout round, r32)
@@ -84,6 +87,7 @@ function buildTeamRuntime(input: EngineInput): TeamRuntime[] {
       name: t.name,
       owner: TEAM_OWNER[t.name] ?? "—",
       currentWins: t.w,
+      currentDraws: t.d,
       condWin,
       reachFirst,
       expRemainingWins: analyticWins,
@@ -107,6 +111,17 @@ function groupExpectedWins(team: string, fixtures: GroupFixture[]): number {
   return e;
 }
 
+// Analytic expected REMAINING draw points from group play for a single team:
+// each remaining fixture the team is in contributes P(draw) * POINTS.draw.
+function groupExpectedDrawPoints(team: string, fixtures: GroupFixture[]): number {
+  let e = 0;
+  for (const f of fixtures) {
+    if (!f.oddsHome) continue;
+    if (f.home === team || f.away === team) e += f.oddsHome.draw * POINTS.draw;
+  }
+  return e;
+}
+
 export function runProjection(input: EngineInput): ProjectionResult {
   const iterations = input.iterations ?? 50000;
   const rng = mulberry32(input.seed ?? 0xC0FFEE);
@@ -116,8 +131,9 @@ export function runProjection(input: EngineInput): ProjectionResult {
   // ---- Analytic expected final points (closed form, exact in expectation) ----
   const teamProjections: TeamProjection[] = teams.map((t) => {
     const grpWins = groupExpectedWins(t.name, input.groupFixtures);
-    const expRemaining = grpWins + t.expRemainingWins;
-    const currentPoints = pointsFor(t.currentWins, 0, 0); // wins only score
+    const expRemaining = grpWins + t.expRemainingWins; // expected remaining WINS
+    const grpDrawPoints = groupExpectedDrawPoints(t.name, input.groupFixtures);
+    const currentPoints = pointsFor(t.currentWins, t.currentDraws, 0);
     const rec = input.records.find((r) => r.name === t.name);
     return {
       team: t.name,
@@ -127,7 +143,9 @@ export function runProjection(input: EngineInput): ProjectionResult {
       l: rec?.l ?? 0,
       currentPoints,
       expectedRemainingWins: round2(expRemaining),
-      expectedFinalPoints: round2(currentPoints + expRemaining * POINTS.win),
+      // Knockout matches have no draws (advancement = a win), so draw points come
+      // only from remaining group fixtures.
+      expectedFinalPoints: round2(currentPoints + expRemaining * POINTS.win + grpDrawPoints),
     };
   });
 
@@ -145,7 +163,7 @@ export function runProjection(input: EngineInput): ProjectionResult {
     ownerTeams.set(t.owner, arr);
   }
   const basePoints = players.map((p) =>
-    (ownerTeams.get(p) || []).reduce((s, t) => s + pointsFor(t.currentWins, 0, 0), 0)
+    (ownerTeams.get(p) || []).reduce((s, t) => s + pointsFor(t.currentWins, t.currentDraws, 0), 0)
   );
 
   // ---- Fixture-leverage bookkeeping ----------------------------------------
@@ -188,7 +206,9 @@ export function runProjection(input: EngineInput): ProjectionResult {
         outcome[fi] = 0;
         addWin(pts, playerIndex, f.home);
       } else if (r < win + draw) {
-        outcome[fi] = 1; // draw — no points under win-only rule
+        outcome[fi] = 1; // draw — both teams' owners get POINTS.draw
+        addDraw(pts, playerIndex, f.home);
+        addDraw(pts, playerIndex, f.away);
       } else {
         outcome[fi] = 2;
         addWin(pts, playerIndex, f.away);
@@ -429,6 +449,7 @@ export function runProjection(input: EngineInput): ProjectionResult {
     iterations,
     generatedAt: new Date().toISOString(),
     oddsSource: "mixed",
+    oddsHistory: {}, // populated by orchestrator from Supabase
   };
 }
 
@@ -441,6 +462,12 @@ function addWin(pts: number[], idx: Map<string, number>, team: string) {
 function addWinByOwner(pts: number[], idx: Map<string, number>, owner: string) {
   const i = idx.get(owner);
   if (i != null) pts[i] += POINTS.win;
+}
+function addDraw(pts: number[], idx: Map<string, number>, team: string) {
+  const owner = TEAM_OWNER[team];
+  if (owner == null) return;
+  const i = idx.get(owner);
+  if (i != null) pts[i] += POINTS.draw;
 }
 
 function round2(x: number) {
