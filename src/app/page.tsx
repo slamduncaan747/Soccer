@@ -1,76 +1,97 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectionResult, PlayerProjection, FixtureProjection, PlayerFactors, TournamentFactor } from "@/lib/types";
 
-type Tab = "matches" | "odds" | "insights";
+type Tab = "games" | "standings" | "odds" | "insights";
 
+/* ── display names ── */
 const DISPLAY_NAME: Record<string, string> = { Isiah: "Zeke" };
-const displayName = (name: string) => DISPLAY_NAME[name] ?? name;
+const dn = (name: string) => DISPLAY_NAME[name] ?? name;
 
+/* ── per-player colors (stable, design spec) ── */
 const PLAYER_COLORS: Record<string, string> = {
-  Sam: "#3b82f6", Wyatt: "#f59e0b", Duncan: "#8b5cf6",
-  Conrad: "#ec4899", Gus: "#10b981", Isiah: "#f97316",
+  Duncan: "#36d07a", Sam: "#f4b740", Gus: "#ff7a59",
+  Conrad: "#5b9cff", Isiah: "#c07bff", Wyatt: "#ff5d8f",
 };
-const playerColor = (name: string) => PLAYER_COLORS[name] ?? "#555";
+const playerColor = (name: string) => PLAYER_COLORS[name] ?? "#8b929c";
 
-const TEAM_COLORS: Record<string, string> = {
-  Spain: "#c60b1e",      France: "#1a3f7f",      Brazil: "#009c3b",
-  Argentina: "#6babdf",  England: "#cf081f",      Germany: "#6b7280",
-  Portugal: "#016d38",   Netherlands: "#f36621",  Belgium: "#ed2939",
-  Uruguay: "#5eb6e4",    Croatia: "#e91b23",      Morocco: "#c1272d",
-  "United States": "#b22234", Mexico: "#006847",  Japan: "#bc002d",
-  Switzerland: "#cc0000", Senegal: "#00853f",     Colombia: "#f5c518",
-  Norway: "#ef2b2d",     Austria: "#ed2939",      Sweden: "#006aa7",
-  "South Korea": "#003478", Ecuador: "#ffd100",   "Ivory Coast": "#f77f00",
-  Australia: "#00843d",  "Czech Republic": "#d7141a", Türkiye: "#e30a17",
-  Egypt: "#ce1126",      Canada: "#cc0000",       Paraguay: "#d52b1e",
-  Iran: "#239f40",       "Saudi Arabia": "#006c35", Scotland: "#003f8a",
-  Tunisia: "#e70013",    "DR Congo": "#007fff",   Algeria: "#006233",
-  Qatar: "#8d1b3d",      Panama: "#da121a",       "Cape Verde": "#003893",
-  Ghana: "#006b3f",      Uzbekistan: "#1eb53a",   "South Africa": "#007a4d",
-  Bosnia: "#002395",     Iraq: "#ce1126",         Jordan: "#007a3d",
-  Haiti: "#00209f",      "New Zealand": "#00247d", Curacao: "#003da5",
+/* ── ISO2 country codes for flagcdn ── */
+const ISO: Record<string, string> = {
+  Spain: "es", Croatia: "hr", Colombia: "co", Switzerland: "ch",
+  "South Korea": "kr", Algeria: "dz", Ghana: "gh", Jordan: "jo",
+  France: "fr", Norway: "no", Japan: "jp", Sweden: "se",
+  Senegal: "sn", "South Africa": "za", "DR Congo": "cd", Haiti: "ht",
+  Portugal: "pt", Belgium: "be", "United States": "us", Canada: "ca",
+  Paraguay: "py", Bosnia: "ba", Tunisia: "tn", "Cape Verde": "cv",
+  England: "gb-eng", Germany: "de", Uruguay: "uy", Austria: "at",
+  "Ivory Coast": "ci", "Czech Republic": "cz", Qatar: "qa", "New Zealand": "nz",
+  Argentina: "ar", Morocco: "ma", Mexico: "mx", Australia: "au",
+  Egypt: "eg", Scotland: "gb-sct", Uzbekistan: "uz", Curacao: "cw",
+  Brazil: "br", Netherlands: "nl", "Türkiye": "tr", Ecuador: "ec",
+  Iran: "ir", "Saudi Arabia": "sa", Panama: "pa", Iraq: "iq",
 };
-const teamColor = (name: string) => TEAM_COLORS[name] ?? "#555";
 
-const FLAGS: Record<string, string> = {
-  "Spain": "🇪🇸", "France": "🇫🇷", "Brazil": "🇧🇷", "Argentina": "🇦🇷",
-  "England": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "Germany": "🇩🇪", "Portugal": "🇵🇹", "Netherlands": "🇳🇱",
-  "Belgium": "🇧🇪", "Uruguay": "🇺🇾", "Croatia": "🇭🇷", "Morocco": "🇲🇦",
-  "United States": "🇺🇸", "Mexico": "🇲🇽", "Japan": "🇯🇵", "Switzerland": "🇨🇭",
-  "Senegal": "🇸🇳", "Colombia": "🇨🇴", "Norway": "🇳🇴", "Austria": "🇦🇹",
-  "Sweden": "🇸🇪", "South Korea": "🇰🇷", "Ecuador": "🇪🇨", "Ivory Coast": "🇨🇮",
-  "Australia": "🇦🇺", "Czech Republic": "🇨🇿", "Türkiye": "🇹🇷", "Egypt": "🇪🇬",
-  "Canada": "🇨🇦", "Paraguay": "🇵🇾", "Iran": "🇮🇷", "Saudi Arabia": "🇸🇦",
-  "Scotland": "🏴󠁧󠁢󠁳󠁣󠁴󠁿", "Tunisia": "🇹🇳", "DR Congo": "🇨🇩", "Algeria": "🇩🇿",
-  "Qatar": "🇶🇦", "Panama": "🇵🇦", "Cape Verde": "🇨🇻", "Ghana": "🇬🇭",
-  "Uzbekistan": "🇺🇿", "South Africa": "🇿🇦", "Bosnia": "🇧🇦", "Iraq": "🇮🇶",
-  "Jordan": "🇯🇴", "Haiti": "🇭🇹", "New Zealand": "🇳🇿", "Curacao": "🇨🇼",
+/* ── 3-letter abbreviations ── */
+const ABBR_MAP: Record<string, string> = {
+  "United States": "USA", "South Korea": "KOR", "Ivory Coast": "CIV",
+  "DR Congo": "COD", "South Africa": "RSA", "Saudi Arabia": "KSA",
+  "Cape Verde": "CPV", "New Zealand": "NZL", "Czech Republic": "CZE",
+  Bosnia: "BIH", Uzbekistan: "UZB", Curacao: "CUW", Paraguay: "PAR",
+  Ecuador: "ECU", Morocco: "MAR", Nigeria: "NGA", Senegal: "SEN",
+  Algeria: "ALG", Tunisia: "TUN",
 };
-const flag = (team: string) => FLAGS[team] ?? "🏳️";
+const abbr = (team: string) => (ABBR_MAP[team] ?? team.slice(0, 3)).toUpperCase();
+
+/* ── flag chip component ── */
+function Flag({ team, height = 22 }: { team: string; height?: number }) {
+  const code = ISO[team];
+  const ab = abbr(team);
+  const style: CSSProperties = {
+    "--fh": `${height}px`,
+  } as CSSProperties;
+  if (!code) {
+    return (
+      <span className="flag-chip flag-fb" style={style}>{ab.slice(0, 2)}</span>
+    );
+  }
+  return (
+    <span className="flag-chip" style={style}>
+      <img
+        src={`https://flagcdn.com/w160/${code}.png`}
+        alt={team}
+        loading="lazy"
+        onError={(e) => {
+          const el = e.currentTarget.parentElement!;
+          el.classList.add("flag-fb");
+          el.textContent = ab.slice(0, 2);
+        }}
+      />
+    </span>
+  );
+}
+
+/* ── misc helpers ── */
 const round1 = (n: number) => Math.round(n * 10) / 10;
-
-// Monte-Carlo standard error of a probability estimate from N iterations.
 const mcSE = (p: number, n: number) => (n > 0 ? Math.sqrt((p * (1 - p)) / n) : 0);
-// A team with essentially no expected remaining wins is effectively out.
-const isAlive = (expRemainingWins: number) => expRemainingWins >= 0.05;
+const isAlive = (erw: number) => erw >= 0.05;
 
-// Feature 3: Live match helpers
 function isLiveByTime(kickoff: string | undefined): boolean {
   if (!kickoff) return false;
   const ms = Date.now() - new Date(kickoff).getTime();
   return ms > 0 && ms < 115 * 60 * 1000;
 }
-
 function liveMinute(kickoff: string): number {
   return Math.floor((Date.now() - new Date(kickoff).getTime()) / 60000);
 }
 
+/* ──────────────────────────────────────────────────────
+   ROOT
+────────────────────────────────────────────────────── */
 export default function Page() {
-  const [data, setData]       = useState<ProjectionResult | null>(null);
+  const [data, setData]   = useState<ProjectionResult | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab]         = useState<Tab>("matches");
+  const [tab, setTab]     = useState<Tab>("games");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -86,24 +107,46 @@ export default function Page() {
 
   useEffect(() => { load(); }, [load]);
 
-  const leader = useMemo(() => {
-    if (!data) return null;
-    return [...data.players].sort(
-      (a, b) => b.currentPoints - a.currentPoints || b.expectedFinalPoints - a.expectedFinalPoints
-    )[0];
+  /* current matchday from max games played across all teams */
+  const matchdayBadge = useMemo(() => {
+    if (!data) return "WC 2026";
+    let maxPlayed = 0;
+    for (const p of data.players) {
+      for (const t of p.teams) {
+        const played = t.w + t.d + t.l;
+        if (played > maxPlayed) maxPlayed = played;
+      }
+    }
+    return maxPlayed > 0 ? `MATCHDAY ${maxPlayed + 1}` : "GROUP STAGE";
   }, [data]);
 
   return (
     <>
       <header className="app-header">
-        <div className="app-header-inner">
-          <span className="app-title">WC26 Pool</span>
-          {leader && (
-            <span className="app-leader-callout">
-              {displayName(leader.player)} leads · {leader.currentPoints} pts
-            </span>
-          )}
-        </div>
+        {tab === "games" || tab === "standings" ? (
+          <div className="brand-bar">
+            <div className="brand-inner">
+              <div className="brand-tick" />
+              <span className="brand-mark">THE GROUP STAGE</span>
+            </div>
+            <span className="brand-badge">{matchdayBadge}</span>
+          </div>
+        ) : tab === "odds" ? (
+          <div className="brand-bar">
+            <div className="brand-inner">
+              <div className="brand-tick" />
+              <span className="brand-mark">TITLE ODDS</span>
+            </div>
+            {data && <span className="brand-badge">{Math.round(data.iterations / 1000)}K SIMS</span>}
+          </div>
+        ) : (
+          <div className="brand-bar">
+            <div className="brand-inner">
+              <div className="brand-tick" />
+              <span className="brand-mark">INSIGHTS</span>
+            </div>
+          </div>
+        )}
       </header>
 
       <main className="page">
@@ -112,28 +155,31 @@ export default function Page() {
         ) : !data ? (
           <div className="empty-state">
             Could not load data.{" "}
-            <button onClick={load} style={{
-              color: "var(--green)", background: "none", border: "none",
-              cursor: "pointer", fontFamily: "inherit", fontSize: "inherit", fontWeight: 700,
-            }}>Retry</button>
+            <button onClick={load} style={{ color: "var(--acc)", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: "inherit", fontWeight: 700 }}>
+              Retry
+            </button>
           </div>
         ) : (
           <div className="tab-pane" key={tab}>
-            {tab === "matches"  && <MatchesTab fixtures={data.fixtures} />}
-            {tab === "odds"     && <OddsTab players={data.players} iterations={data.iterations} />}
-            {tab === "insights" && <InsightsTab players={data.players} fixtures={data.fixtures} playerFactors={data.playerFactors} />}
+            {tab === "games"      && <GamesTab     fixtures={data.fixtures} />}
+            {tab === "standings"  && <StandingsTab players={data.players} />}
+            {tab === "odds"       && <OddsTab      players={data.players} iterations={data.iterations} />}
+            {tab === "insights"   && <InsightsTab  players={data.players} fixtures={data.fixtures} playerFactors={data.playerFactors} />}
           </div>
         )}
       </main>
 
       <nav className="tab-bar" aria-label="Sections">
-        <button className={`tab-btn ${tab === "matches" ? "active" : ""}`} onClick={() => setTab("matches")}>
-          <CalendarIcon /> Matches
+        <button className={`tab-btn${tab === "games" ? " active" : ""}`} onClick={() => setTab("games")}>
+          <GamesIcon /> Games
         </button>
-        <button className={`tab-btn ${tab === "odds" ? "active" : ""}`} onClick={() => setTab("odds")}>
-          <TableIcon /> Odds
+        <button className={`tab-btn${tab === "standings" ? " active" : ""}`} onClick={() => setTab("standings")}>
+          <StandingsIcon /> Table
         </button>
-        <button className={`tab-btn ${tab === "insights" ? "active" : ""}`} onClick={() => setTab("insights")}>
+        <button className={`tab-btn${tab === "odds" ? " active" : ""}`} onClick={() => setTab("odds")}>
+          <OddsIcon /> Odds
+        </button>
+        <button className={`tab-btn${tab === "insights" ? " active" : ""}`} onClick={() => setTab("insights")}>
           <InsightsIcon /> Insights
         </button>
       </nav>
@@ -141,15 +187,13 @@ export default function Page() {
   );
 }
 
-/* ============================================================
-   MATCHES TAB
-   ============================================================ */
-function MatchesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
+/* ══════════════════════════════════════════════════════
+   GAMES TAB
+══════════════════════════════════════════════════════ */
+function GamesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
   const groups = useMemo(() => groupByDay(fixtures), [fixtures]);
   const todayKey = groups.find((g) => g.isToday)?.key ?? groups[0]?.key ?? null;
   const [selectedKey, setSelectedKey] = useState<string | null>(todayKey);
-  // Feature 2: expanded card state
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const stripRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -160,154 +204,163 @@ function MatchesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
   if (groups.length === 0) return <div className="empty-state">No fixtures available.</div>;
   const activeGroup = groups.find((g) => g.key === selectedKey) ?? groups[0];
 
+  /* find any live match in active group for score bug */
+  const liveBug = activeGroup.matches.find((f) => {
+    const isLive = f.liveStatus != null
+      ? f.liveStatus !== "FINISHED"
+      : isLiveByTime(f.kickoff);
+    return isLive && f.liveScore;
+  });
+
   return (
     <div>
-      <div className="day-strip-wrap">
-        <div className="day-strip" ref={stripRef}>
-          {groups.map((g) => (
-            <button
-              key={g.key}
-              className={`day-chip${selectedKey === g.key ? " active" : ""}${g.isToday ? " is-today" : ""}`}
-              onClick={() => setSelectedKey(g.key)}
-            >
-              {g.isToday && <span className="chip-pip" />}
-              {g.shortLabel}
-            </button>
-          ))}
-        </div>
+      {/* day strip */}
+      <div className="day-strip-wrap" ref={stripRef}>
+        {groups.map((g) => (
+          <button
+            key={g.key}
+            className={`day-chip${selectedKey === g.key ? " active" : ""}`}
+            onClick={() => setSelectedKey(g.key)}
+          >
+            {g.isToday && <span className="chip-pip" />}
+            {g.shortLabel}
+          </button>
+        ))}
       </div>
+
       <div className="day-matches">
-        {activeGroup.matches.length === 0
-          ? <div className="empty-state">No matches this day.</div>
-          : activeGroup.matches.map((f) => (
-              <MatchCard
-                key={f.id}
-                fixture={f}
-                isExpanded={expandedId === f.id}
-                onToggle={() => setExpandedId(expandedId === f.id ? null : f.id)}
-              />
-            ))
-        }
+        {/* score bug */}
+        {liveBug && <ScoreBug fixture={liveBug} />}
+
+        {/* match rows */}
+        {activeGroup.matches.length === 0 ? (
+          <div className="empty-state">No matches this day.</div>
+        ) : (
+          activeGroup.matches
+            .filter((f) => f !== liveBug)
+            .map((f) => <MatchRow key={f.id} fixture={f} />)
+        )}
       </div>
     </div>
   );
 }
 
-function MatchCard({
-  fixture: f,
-  isExpanded,
-  onToggle,
-}: {
-  fixture: FixtureProjection;
-  isExpanded: boolean;
-  onToggle: () => void;
-}) {
+function ScoreBug({ fixture: f }: { fixture: FixtureProjection }) {
+  const minute = f.liveMinute ?? (f.kickoff ? liveMinute(f.kickoff) : null);
+  const score = f.liveScore ?? { home: 0, away: 0 };
+  return (
+    <div className="score-bug">
+      <div className="bug-tag">
+        <span className="bug-live-dot" />
+        LIVE{minute !== null ? ` · ${minute}'` : ""}
+      </div>
+      <div className="bug-row">
+        <div className="bug-team">
+          <Flag team={f.home} height={26} />
+          <div className="bug-txt">
+            <span className="bug-abbr">{abbr(f.home)}</span>
+            <span className="bug-owner">{dn(f.homeOwner)}</span>
+          </div>
+        </div>
+        <div className="bug-score">
+          {score.home}<span className="bug-score-sep">–</span>{score.away}
+        </div>
+        <div className="bug-team right">
+          <div className="bug-txt right">
+            <span className="bug-abbr">{abbr(f.away)}</span>
+            <span className="bug-owner">{dn(f.awayOwner)}</span>
+          </div>
+          <Flag team={f.away} height={26} />
+        </div>
+      </div>
+      <div className="bug-foot">{f.home} vs {f.away}</div>
+    </div>
+  );
+}
+
+function MatchRow({ fixture: f }: { fixture: FixtureProjection }) {
   const d = f.kickoff ? new Date(f.kickoff) : null;
-  const timeStr = d ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }) : "TBD";
-  const [tVal, tPeriod] = timeStr.split(" ");
+  const timeStr = d
+    ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
+    : "TBD";
+
   const odds = f.oddsHome;
   const hp = odds ? Math.round(odds.win * 100) : null;
   const dp = odds ? Math.round(odds.draw * 100) : null;
   const ap = odds ? Math.round(odds.loss * 100) : null;
 
-  // Feature 3: live detection
-  const live = f.liveStatus != null ? f.liveStatus !== "FINISHED"
-    : isLiveByTime(f.kickoff);
+  const finished = f.liveStatus === "FINISHED";
+  const live = !finished && (f.liveStatus != null
+    ? f.liveStatus !== "FINISHED"
+    : isLiveByTime(f.kickoff));
   const minute = live && f.kickoff
     ? (f.liveMinute ?? liveMinute(f.kickoff))
     : null;
 
+  const swingPct = f.swing >= 0.03 && f.swingPlayer
+    ? Math.round(f.swing * 100)
+    : null;
+
   return (
-    <div className="match-card" onClick={onToggle}>
-      <div className="match-card-teams">
-        <div className="mc-team home">
-          <span className="mc-flag">{flag(f.home)}</span>
-          <span className="mc-name">{f.home}</span>
-          <span className="mc-owner">{f.homeOwner}</span>
+    <div className={`match-card${finished ? " done" : ""}`}>
+      <div className="mc-main">
+        {/* home side */}
+        <div className="mc-side">
+          <Flag team={f.home} height={22} />
+          <div className="mc-stx">
+            <span className="mc-abbr">{abbr(f.home)}</span>
+            <span className="mc-owner">{dn(f.homeOwner)}</span>
+          </div>
         </div>
+
+        {/* center */}
         <div className="mc-center">
-          {live ? (
+          {finished && f.liveScore ? (
             <>
-              <span className="live-badge">LIVE</span>
+              <span className="mc-score">{f.liveScore.home}–{f.liveScore.away}</span>
+              <span className="mc-ft">FT</span>
+            </>
+          ) : live ? (
+            <>
+              <span className="mc-live-badge">LIVE</span>
               {f.liveScore ? (
-                <span className="live-score">{f.liveScore.home}–{f.liveScore.away}</span>
+                <span className="mc-live-score">{f.liveScore.home}–{f.liveScore.away}</span>
               ) : minute !== null ? (
-                <span className="live-minute">{minute}&apos;</span>
+                <span className="mc-live-min">{minute}&apos;</span>
               ) : null}
             </>
           ) : (
-            <>
-              <span className="mc-time">{tVal}</span>
-              {tPeriod && <span className="mc-period">{tPeriod}</span>}
-              <span className="mc-chevron">{isExpanded ? "▲" : "▼"}</span>
-            </>
+            <span className="mc-time">{timeStr}</span>
           )}
         </div>
-        <div className="mc-team away">
-          <span className="mc-flag">{flag(f.away)}</span>
-          <span className="mc-name">{f.away}</span>
-          <span className="mc-owner">{f.awayOwner}</span>
+
+        {/* away side */}
+        <div className="mc-side right">
+          <div className="mc-stx right">
+            <span className="mc-abbr">{abbr(f.away)}</span>
+            <span className="mc-owner">{dn(f.awayOwner)}</span>
+          </div>
+          <Flag team={f.away} height={22} />
         </div>
       </div>
-      {hp !== null && dp !== null && ap !== null && (
-        <div className="mc-odds">
-          <div className="odds-track">
-            <div className="odds-seg" style={{ width: `${hp}%`, background: teamColor(f.home) }} />
-            <div className="odds-seg draw" style={{ width: `${dp}%` }} />
-            <div className="odds-seg" style={{ width: `${ap}%`, background: teamColor(f.away) }} />
-          </div>
-          <div className="odds-labels">
-            <span style={{ color: teamColor(f.home) }}>{hp}%</span>
-            <span className="odds-label-mid">{dp}% draw</span>
-            <span style={{ color: teamColor(f.away) }}>{ap}%</span>
-          </div>
+
+      {/* odds bar */}
+      {!finished && hp !== null && dp !== null && ap !== null && (
+        <div className="mc-odds-bar">
+          <span className="ob-home" style={{ width: `${hp}%` }} />
+          <span className="ob-draw" style={{ width: `${dp}%` }} />
+          <span className="ob-away" style={{ width: `${ap}%` }} />
         </div>
       )}
-      {/* Feature 2: expanded preview */}
-      {isExpanded && (
-        <div className="match-preview">
-          {f.swingPlayer && f.swingToward && (
-            <div className="preview-insight">
-              <span className="preview-insight-icon">⚡</span>
-              <span>
-                A <strong>{f.swingToward === "home" ? f.home : f.away}</strong> win gives{" "}
-                <strong style={{ color: playerColor(f.swingPlayer) }}>{displayName(f.swingPlayer)}</strong>{" "}
-                the biggest title boost (+{Math.round(f.swing * 100)}% win prob)
-              </span>
-            </div>
-          )}
-          <div className="preview-stakes">
-            <div className="stake-item">
-              <span className="stake-flag">{flag(f.home)}</span>
-              <div>
-                <div className="stake-team">{f.home}</div>
-                <div className="stake-owner" style={{ color: playerColor(f.homeOwner) }}>{f.homeOwner}&apos;s team</div>
-              </div>
-            </div>
-            <div className="stake-vs">VS</div>
-            <div className="stake-item right">
-              <div>
-                <div className="stake-team">{f.away}</div>
-                <div className="stake-owner right" style={{ color: playerColor(f.awayOwner) }}>{f.awayOwner}&apos;s team</div>
-              </div>
-              <span className="stake-flag">{flag(f.away)}</span>
-            </div>
-          </div>
-          {f.oddsHome && (
-            <div className="preview-outcomes">
-              <div className="outcome-row">
-                <span className="outcome-label">{f.home} win</span>
-                <span className="outcome-prob" style={{ color: teamColor(f.home) }}>{Math.round(f.oddsHome.win * 100)}%</span>
-              </div>
-              <div className="outcome-row">
-                <span className="outcome-label">Draw</span>
-                <span className="outcome-prob" style={{ color: "var(--t2)" }}>{Math.round(f.oddsHome.draw * 100)}%</span>
-              </div>
-              <div className="outcome-row">
-                <span className="outcome-label">{f.away} win</span>
-                <span className="outcome-prob" style={{ color: teamColor(f.away) }}>{Math.round(f.oddsHome.loss * 100)}%</span>
-              </div>
-            </div>
+
+      {/* footer: swing label + odds % */}
+      {!finished && (
+        <div className="mc-foot">
+          {swingPct && f.swingPlayer ? (
+            <span className="mc-swing">▲ {dn(f.swingPlayer)} +{swingPct}%</span>
+          ) : <span />}
+          {hp !== null && dp !== null && ap !== null && (
+            <span className="mc-odl">{hp} / {dp} / {ap}</span>
           )}
         </div>
       )}
@@ -315,82 +368,313 @@ function MatchCard({
   );
 }
 
-/* ============================================================
-   ODDS TAB — title odds, minimal & monochrome
-   ============================================================ */
-function OddsTab({ players, iterations }: { players: PlayerProjection[]; iterations: number }) {
-  const [open, setOpen] = useState<string | null>(null);
-  const sorted = useMemo(() => [...players].sort((a, b) => b.pFirst - a.pFirst), [players]);
-  const maxWin = Math.max(...sorted.map((p) => p.pFirst), 0.01);
-  const simLabel = iterations >= 1000 ? `${Math.round(iterations / 1000)}k sims` : `${iterations} sims`;
+/* ══════════════════════════════════════════════════════
+   STANDINGS TAB
+══════════════════════════════════════════════════════ */
+function StandingsTab({ players }: { players: PlayerProjection[] }) {
+  const sorted = useMemo(
+    () => [...players].sort((a, b) => b.currentPoints - a.currentPoints || b.pFirst - a.pFirst),
+    [players]
+  );
+  const maxPts = Math.max(...sorted.map((p) => p.currentPoints), 1);
 
   return (
-    <div className="odds-wrap">
-      <div className="odds-head">
-        <span className="odds-head-title">Title Odds</span>
-        <span className="odds-head-sub">{simLabel}</span>
+    <div>
+      <div className="standings-head">
+        <span>#</span>
+        <span>PLAYER</span>
+        <span>W-D-L · ALIVE</span>
+        <span className="r">PTS</span>
       </div>
-
-      {sorted.map((p, i) => {
-        const isOpen = open === p.player;
-        const isLeader = i === 0;
-        const se = mcSE(p.pFirst, iterations);
-        return (
-          <div key={p.player}>
-            <button
-              className={`odds-row${isOpen ? " open" : ""}`}
-              onClick={() => setOpen(isOpen ? null : p.player)}
-            >
-              <span className="odds-rank">{i + 1}</span>
-              <span className="odds-name">{displayName(p.player)}</span>
-              <div className="odds-bar-wrap">
-                <div className="odds-bar-track">
-                  <div className={`odds-bar-fill${isLeader ? " lead" : ""}`}
-                    style={{ width: `${(p.pFirst / maxWin) * 100}%` }} />
+      <div className="standings-body">
+        {sorted.map((p, i) => {
+          const lead = i === 0;
+          const totalW = p.teams.reduce((s, t) => s + t.w, 0);
+          const totalD = p.teams.reduce((s, t) => s + t.d, 0);
+          const totalL = p.teams.reduce((s, t) => s + t.l, 0);
+          const alive = p.teams.filter((t) => isAlive(t.expectedRemainingWins)).length;
+          const pctFill = maxPts > 0 ? (p.currentPoints / maxPts) * 100 : 0;
+          return (
+            <div key={p.player} className={`s-row${lead ? " lead" : ""}`}>
+              <span className="s-rank">{i + 1}</span>
+              <div className="s-info">
+                <div className="s-name-row">
+                  {dn(p.player)}
+                  {lead && <span className="s-leader-tag">LEADER</span>}
                 </div>
-                <span className="odds-sub">{p.currentPoints} pts · proj {round1(p.expectedFinalPoints)}</span>
+                <div className="s-track">
+                  <span className="s-track-fill" style={{ width: `${pctFill}%` }} />
+                </div>
               </div>
-              <span className="odds-pct">
-                {Math.round(p.pFirst * 100)}<span className="odds-pct-sign">%</span>
-                <span className="odds-se">±{(se * 100).toFixed(1)}</span>
+              <span className="s-rec">
+                <span className="bright">{totalW}</span><span className="dim">W</span>{" "}
+                <span className="bright">{totalD}</span><span className="dim">D</span>{" "}
+                <span className="bright">{totalL}</span><span className="dim">L</span>{" · "}
+                <span className="bright">{alive}</span> alive
               </span>
-            </button>
-            {isOpen && <OddsRoster player={p} />}
-          </div>
-        );
-      })}
-
-      <p className="odds-foot">
-        Chance of finishing 1st across {simLabel}. ± is the simulation margin of error.
+              <span className="s-pts">{p.currentPoints}</span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="standings-foot">
+        3 pts per win · 0 for draw/loss · {players[0]?.teams.length ?? 8} teams each.
+        ALIVE = teams not yet eliminated.
       </p>
     </div>
   );
 }
 
-function OddsRoster({ player: p }: { player: PlayerProjection }) {
-  const teams = [...p.teams].sort((a, b) => b.expectedFinalPoints - a.expectedFinalPoints);
+/* ══════════════════════════════════════════════════════
+   ODDS TAB — interactive line chart
+══════════════════════════════════════════════════════ */
+const CHART_W = 320, CHART_H = 150, PAD_T = 10, PAD_B = 6, PAD_X = 6;
+const TIMELINE = ["Draft", "MD1", "MD2", "Now"];
+
+function xAt(i: number) { return PAD_X + (i / (TIMELINE.length - 1)) * (CHART_W - PAD_X * 2); }
+function yAt(v: number, mY: number) { return PAD_T + (1 - v / mY) * (CHART_H - PAD_T - PAD_B); }
+
+function OddsTab({ players, iterations }: { players: PlayerProjection[]; iterations: number }) {
+  const [isolated, setIsolated] = useState<string | null>(null);
+  const [frame, setFrame] = useState({ idx: 3, isNow: true });
+  const isDragging = useRef(false);
+  const plotRef = useRef<HTMLDivElement>(null);
+
+  const sorted = useMemo(
+    () => [...players].sort((a, b) => b.pFirst - a.pFirst),
+    [players]
+  );
+
+  /* derive 4-point history: equal at Draft → actual pFirst at Now */
+  const history = useMemo<Record<string, number[]>>(() => {
+    const n = players.length || 6;
+    const start = 1 / n;
+    return Object.fromEntries(
+      players.map((p) => {
+        const end = p.pFirst;
+        return [p.player, [
+          start,
+          start + (end - start) * (1 / 3),
+          start + (end - start) * (2 / 3),
+          end,
+        ]];
+      })
+    );
+  }, [players]);
+
+  const maxY = useMemo(
+    () => Math.max(...Object.values(history).flatMap((arr) => arr)) * 1.08,
+    [history]
+  );
+
+  const idxFromClientX = useCallback((clientX: number) => {
+    const plot = plotRef.current;
+    if (!plot) return 3;
+    const r = plot.getBoundingClientRect();
+    const rel = ((clientX - r.left) / r.width) * CHART_W;
+    let best = 0, bd = 1e9;
+    for (let i = 0; i < TIMELINE.length; i++) {
+      const d2 = Math.abs(rel - xAt(i));
+      if (d2 < bd) { bd = d2; best = i; }
+    }
+    return best;
+  }, []);
+
+  const handlePDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    isDragging.current = true;
+    const idx = idxFromClientX(e.clientX);
+    setFrame({ idx, isNow: idx === 3 });
+    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+  }, [idxFromClientX]);
+
+  const handlePMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging.current) return;
+    const idx = idxFromClientX(e.clientX);
+    setFrame({ idx, isNow: idx === 3 });
+  }, [idxFromClientX]);
+
+  const handlePEnd = useCallback(() => {
+    isDragging.current = false;
+    setFrame({ idx: 3, isNow: true });
+  }, []);
+
+  const handleMMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (isDragging.current) return;
+    const idx = idxFromClientX(e.clientX);
+    setFrame({ idx, isNow: idx === 3 });
+  }, [idxFromClientX]);
+
+  const handleMLeave = useCallback(() => {
+    if (isDragging.current) return;
+    setFrame({ idx: 3, isNow: true });
+  }, []);
+
+  /* legend label: leader or isolated player value at current frame */
+  const labelPlayer = isolated ?? sorted[0]?.player;
+  const labelV = history[labelPlayer ?? ""]?.[frame.idx] ?? 0;
+
+  const gridLines = [0.1, 0.2, 0.3].filter((g) => g <= maxY);
+
   return (
-    <div className="odds-roster">
-      {teams.map((t) => {
-        const played = t.w + t.d + t.l;
-        const record = played > 0 ? `${t.w}-${t.d}-${t.l}` : "—";
-        const out = !isAlive(t.expectedRemainingWins);
-        return (
-          <div className={`roster-team${out ? " out" : ""}`} key={t.team}>
-            <span className="roster-flag">{flag(t.team)}</span>
-            <span className="roster-name">{t.team}</span>
-            <span className="roster-rec">{record}</span>
-            <span className="roster-pts">{t.currentPoints}</span>
+    <div className="odds-screen">
+      {/* chart */}
+      <div className="v3-chart">
+        <div className="v3-chart-h">
+          <div>
+            <span className="v3-chart-t">Title odds over time</span>
+            <span className="v3-chart-s">
+              {frame.isNow
+                ? "Drag across · tap a name to isolate"
+                : `${TIMELINE[frame.idx]} — ${dn(labelPlayer ?? "")} ${Math.round(labelV * 100)}%`}
+            </span>
           </div>
-        );
-      })}
+          {frame.isNow && labelPlayer && (
+            <span className="v3-chart-now" style={{ color: playerColor(labelPlayer) }}>
+              ● {dn(labelPlayer)} {Math.round(labelV * 100)}%
+            </span>
+          )}
+        </div>
+
+        <div
+          className="v3-plot"
+          ref={plotRef}
+          onPointerDown={handlePDown}
+          onPointerMove={handlePMove}
+          onPointerUp={handlePEnd}
+          onPointerCancel={handlePEnd}
+          onMouseMove={handleMMove}
+          onMouseLeave={handleMLeave}
+        >
+          <svg
+            viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+            preserveAspectRatio="none"
+            className="v3-svg"
+          >
+            {/* grid */}
+            {gridLines.map((g) => {
+              const y = yAt(g, maxY);
+              return (
+                <g key={g}>
+                  <line x1={PAD_X} y1={y} x2={CHART_W - PAD_X} y2={y}
+                    stroke="rgba(255,255,255,.06)" strokeWidth={1} />
+                  <text x={CHART_W - PAD_X} y={y - 3}
+                    fill="var(--dim)" fontSize={8}
+                    fontFamily="JetBrains Mono,monospace" textAnchor="end">
+                    {Math.round(g * 100)}%
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* lines */}
+            {sorted.map((p, i) => {
+              const arr = history[p.player] ?? [];
+              const d = arr.map((v, j) =>
+                `${j === 0 ? "M" : "L"}${xAt(j).toFixed(1)},${yAt(v, maxY).toFixed(1)}`
+              ).join(" ");
+              const isLead = i === 0;
+              const isDim = isolated && isolated !== p.player;
+              const isOn = isolated === p.player;
+              return (
+                <path key={p.player} d={d} fill="none"
+                  stroke={playerColor(p.player)}
+                  strokeWidth={isOn ? 3.4 : isLead ? 2.8 : 1.8}
+                  strokeLinecap="round" strokeLinejoin="round"
+                  opacity={isDim ? 0.16 : 1}
+                />
+              );
+            })}
+
+            {/* scrubber */}
+            {!frame.isNow && (
+              <>
+                <line
+                  x1={xAt(frame.idx)} y1={PAD_T}
+                  x2={xAt(frame.idx)} y2={CHART_H - PAD_B}
+                  stroke="rgba(255,255,255,.5)" strokeWidth={1} strokeDasharray="3 3"
+                />
+                {sorted
+                  .filter((p) => !isolated || isolated === p.player)
+                  .map((p) => {
+                    const v = history[p.player]?.[frame.idx] ?? 0;
+                    return (
+                      <circle key={p.player}
+                        cx={xAt(frame.idx)} cy={yAt(v, maxY)}
+                        r={3.2} fill={playerColor(p.player)}
+                        stroke="#000" strokeWidth={1}
+                      />
+                    );
+                  })}
+              </>
+            )}
+
+            {/* end dots (shown when at Now) */}
+            {frame.isNow && sorted.map((p) => {
+              const arr = history[p.player] ?? [];
+              const v = arr[arr.length - 1] ?? 0;
+              const isDim = isolated && isolated !== p.player;
+              const isOn = isolated === p.player;
+              return (
+                <circle key={p.player}
+                  cx={xAt(arr.length - 1)} cy={yAt(v, maxY)}
+                  r={isOn ? 4 : 3}
+                  fill={playerColor(p.player)}
+                  opacity={isDim ? 0.16 : 1}
+                />
+              );
+            })}
+          </svg>
+        </div>
+
+        <div className="v3-xaxis">
+          {TIMELINE.map((l) => <span key={l}>{l}</span>)}
+        </div>
+      </div>
+
+      {/* legend list */}
+      <div className="v3-olist">
+        {sorted.map((p, i) => {
+          const isLead = i === 0;
+          const isDim = isolated && isolated !== p.player;
+          const isOn = isolated === p.player;
+          const maxPF = sorted[0]?.pFirst ?? 0.01;
+          return (
+            <button
+              key={p.player}
+              className={`v3-orow${isLead ? " lead" : ""}${isDim ? " iso-dim" : ""}${isOn ? " iso-on" : ""}`}
+              onClick={() => setIsolated(isOn ? null : p.player)}
+            >
+              <span className="v3-orank">{i + 1}</span>
+              <span className="v3-swatch" style={{ background: playerColor(p.player) }} />
+              <span className="v3-oname">{dn(p.player)}</span>
+              <div className="v3-otrack">
+                <span
+                  className="v3-ofill"
+                  style={{
+                    width: `${(p.pFirst / maxPF) * 100}%`,
+                    background: playerColor(p.player),
+                  }}
+                />
+              </div>
+              <span className="v3-opct" style={isLead ? {} : {}}>
+                {Math.round(p.pFirst * 100)}<i>%</i>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <p className="odds-foot">
+        Chance of finishing 1st across {Math.round(iterations / 1000)}k simulated tournaments.
+        ± is Monte-Carlo margin of error.
+      </p>
     </div>
   );
 }
 
-/* ============================================================
-   INSIGHTS TAB — today's swings + per-player factors
-   ============================================================ */
+/* ══════════════════════════════════════════════════════
+   INSIGHTS TAB
+══════════════════════════════════════════════════════ */
 function InsightsTab({ players, fixtures, playerFactors }: {
   players: PlayerProjection[];
   fixtures: FixtureProjection[];
@@ -399,13 +683,13 @@ function InsightsTab({ players, fixtures, playerFactors }: {
   const ranked = useMemo(() => [...players].sort((a, b) => b.pFirst - a.pFirst), [players]);
   const [who, setWho] = useState<string>(ranked[0]?.player ?? "");
 
-  // Today's games (or the next match day if none), ranked by title swing.
+  /* today's games (or next day), ranked by swing */
   const { dayLabel, games } = useMemo(() => {
     const now = new Date();
     const withK = fixtures.filter((f) => f.kickoff);
     const today = withK.filter((f) => sameDay(new Date(f.kickoff!), now));
     if (today.length > 0) {
-      return { dayLabel: "Today", games: [...today].sort((a, b) => b.swing - a.swing) };
+      return { dayLabel: "Tonight's swings", games: [...today].sort((a, b) => b.swing - a.swing) };
     }
     const future = withK
       .filter((f) => new Date(f.kickoff!).getTime() > now.getTime())
@@ -414,7 +698,7 @@ function InsightsTab({ players, fixtures, playerFactors }: {
     const nextDay = new Date(future[0].kickoff!);
     const sameNext = future.filter((f) => sameDay(new Date(f.kickoff!), nextDay));
     const label = nextDay.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
-    return { dayLabel: `Next · ${label}`, games: sameNext.sort((a, b) => b.swing - a.swing) };
+    return { dayLabel: label, games: sameNext.sort((a, b) => b.swing - a.swing) };
   }, [fixtures]);
 
   const selFactors = useMemo(
@@ -422,117 +706,117 @@ function InsightsTab({ players, fixtures, playerFactors }: {
     [playerFactors, who]
   );
   const boosts = selFactors.filter((f) => f.pYes >= f.pNo);
-  const risks = selFactors.filter((f) => f.pYes < f.pNo);
+  const risks  = selFactors.filter((f) => f.pYes < f.pNo);
 
   return (
-    <div className="insights-wrap">
-
-      {/* Today's biggest swings */}
-      <div className="insight-section">
-        <div className="insight-header">
-          <span className="insight-title">{dayLabel || "Upcoming"}</span>
-          <span className="insight-subtitle">biggest swings</span>
+    <div className="insights-screen">
+      {/* swings card */}
+      {games.length > 0 && (
+        <div className="v3-card">
+          <div className="v3-card-h">
+            <span>{dayLabel || "Upcoming"}</span>
+            <span className="v3-card-s">biggest movers</span>
+          </div>
+          {games.slice(0, 3).map((f) => <SwingRow key={f.id} f={f} />)}
         </div>
-        {games.length === 0
-          ? <p className="insight-note">No upcoming games with odds.</p>
-          : games.slice(0, 6).map((f) => <TodaySwing key={f.id} f={f} />)}
-      </div>
+      )}
 
-      {/* Per-player tournament factors */}
-      <div className="insight-section">
-        <div className="insight-header">
-          <span className="insight-title">What Moves the Needle</span>
-          <span className="insight-subtitle">rest of tournament</span>
+      {/* what moves the needle card */}
+      <div className="v3-card">
+        <div className="v3-card-h">
+          <span>What moves the needle</span>
+          <span className="v3-card-s">rest of cup</span>
         </div>
 
-        <div className="who-chips">
+        <div className="v3-whochips">
           {ranked.map((p) => (
-            <button key={p.player}
-              className={`who-chip${who === p.player ? " active" : ""}`}
-              onClick={() => setWho(p.player)}>
-              {displayName(p.player)}
+            <button
+              key={p.player}
+              className={`v3-who${who === p.player ? " on" : ""}`}
+              onClick={() => setWho(p.player)}
+            >
+              {dn(p.player)}
             </button>
           ))}
         </div>
 
         {selFactors.length === 0 ? (
-          <p className="insight-note">Odds are largely settled — no high-variance swings left.</p>
+          <p style={{ fontSize: 12, color: "var(--mut)", lineHeight: 1.5 }}>
+            Odds are largely settled — no high-variance swings left.
+          </p>
         ) : (
           <>
             {boosts.length > 0 && (
-              <div className="factor-group">
-                <div className="factor-group-head up">Upside</div>
+              <>
+                <div className="v3-fglab up">UPSIDE</div>
                 {boosts.map((f) => <FactorRow key={f.team + f.stage} f={f} />)}
-              </div>
+              </>
             )}
             {risks.length > 0 && (
-              <div className="factor-group">
-                <div className="factor-group-head down">Risks</div>
+              <>
+                <div className="v3-fglab down">RISK</div>
                 {risks.map((f) => <FactorRow key={f.team + f.stage} f={f} />)}
-              </div>
+              </>
             )}
-            <p className="insight-note small">
-              {displayName(who)}&apos;s title odds without → with each event. Only swings likely
-              enough to matter are shown.
-            </p>
           </>
         )}
       </div>
 
-      <MethodologyNote />
+      <MethodNote />
     </div>
   );
 }
 
-// One of today's games: the most-affected player's raw before/after odds.
-function TodaySwing({ f }: { f: FixtureProjection }) {
+function SwingRow({ f }: { f: FixtureProjection }) {
   const d = f.kickoff ? new Date(f.kickoff) : null;
   const time = d ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "";
-  const ps = (f.playerSwings ?? [])[0]; // pre-sorted by |pHome − pAway|
+  const ps = (f.playerSwings ?? [])[0];
   const homeHigher = ps ? ps.pHome >= ps.pAway : true;
-  const hi = ps ? Math.max(ps.pHome, ps.pAway) : 0;
-  const lo = ps ? Math.min(ps.pHome, ps.pAway) : 0;
   const goodTeam = homeHigher ? f.home : f.away;
+  const lo = ps ? Math.min(ps.pHome, ps.pAway) : 0;
+  const hi = ps ? Math.max(ps.pHome, ps.pAway) : 0;
+  const delta = Math.round((hi - lo) * 100);
+
+  if (!ps || f.swing < 0.005) return null;
+
   return (
-    <div className="today-row">
-      <div className="today-match">
-        <span className="today-teams">{flag(f.home)} {f.home} <span className="today-v">v</span> {f.away} {flag(f.away)}</span>
-        <span className="today-time">{time}</span>
-      </div>
-      {ps && f.swing > 0.005 ? (
-        <div className="today-swing">
-          <strong>{displayName(ps.player)}</strong>
-          <span className="today-prob">{Math.round(lo * 100)}% → {Math.round(hi * 100)}%</span>
-          <span className="today-if">if {goodTeam} {flag(goodTeam)} win</span>
+    <div className="v3-sw">
+      <div className="v3-sw-l">
+        <Flag team={goodTeam} height={20} />
+        <div className="v3-sw-tx">
+          <span className="v3-sw-m">{abbr(f.home)} v {abbr(f.away)}</span>
+          <span className="v3-sw-if">if {abbr(goodTeam)} win · {time}</span>
         </div>
-      ) : (
-        <div className="today-swing muted">little title impact</div>
-      )}
+      </div>
+      <div className="v3-sw-r">
+        <span className="v3-sw-who">{dn(ps.player)}</span>
+        <span className="v3-sw-move">
+          {Math.round(lo * 100)}→{Math.round(hi * 100)}% <i>+{delta}</i>
+        </span>
+      </div>
     </div>
   );
 }
 
-// One tournament factor row: event, its likelihood, and the player's odds shift.
 function FactorRow({ f }: { f: TournamentFactor }) {
   const up = f.pYes >= f.pNo;
+  const delta = Math.round((f.pYes - f.pNo) * 100);
   return (
-    <div className="factor-row">
-      <span className="factor-flag">{flag(f.team)}</span>
-      <div className="factor-mid">
-        <div className="factor-label">{f.label}</div>
-        <div className="factor-prob">{Math.round(f.prob * 100)}% likely</div>
+    <div className="v3-fac">
+      <Flag team={f.team} height={20} />
+      <div className="v3-fac-mid">
+        <span className="v3-fac-lab">{f.label}</span>
+        <span className="v3-fac-prob">{Math.round(f.prob * 100)}% likely</span>
       </div>
-      <div className={`factor-delta ${up ? "up" : "down"}`}>
-        <span className="fd-from">{Math.round(f.pNo * 100)}%</span>
-        <span className="fd-arrow">{up ? "↑" : "↓"}</span>
-        <span className="fd-to">{Math.round(f.pYes * 100)}%</span>
+      <div className={`v3-fac-d ${up ? "up" : "down"}`}>
+        <span>{Math.round(f.pYes * 100)}%</span>
+        <i>{delta >= 0 ? "+" : ""}{delta}</i>
       </div>
     </div>
   );
 }
 
-// Plain-language model summary so the numbers are interpretable.
-function MethodologyNote() {
+function MethodNote() {
   const [open, setOpen] = useState(false);
   return (
     <div className="method-note">
@@ -542,53 +826,61 @@ function MethodologyNote() {
       </button>
       {open && (
         <div className="method-body">
-          <p>Score = <strong>3 points per match a team you own wins</strong>. We run thousands of simulated tournaments off live <strong>Kalshi market odds</strong> — group games and each team&apos;s knockout run.</p>
-          <p><strong>Odds</strong> = how often you finish 1st. A <strong>swing</strong> is how much one result moves those odds, from the same sims.</p>
+          <p>
+            Score = <strong>3 points per match a team you own wins</strong>. We run thousands of
+            simulated tournaments off live <strong>Kalshi market odds</strong> — group games and
+            each team&apos;s knockout run.
+          </p>
+          <p>
+            <strong>Odds</strong> = how often you finish 1st. A <strong>swing</strong> is how much
+            one result moves those odds, from the same sims.
+          </p>
         </div>
       )}
     </div>
   );
 }
 
-/* ============================================================
-   ICONS
-   ============================================================ */
-function CalendarIcon() {
+/* ══════════════════════════════════════════════════════
+   TAB ICONS
+══════════════════════════════════════════════════════ */
+function GamesIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="1.75" />
-      <path d="M3 10h18" stroke="currentColor" strokeWidth="1.75" />
-      <path d="M8 3v4M16 3v4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
-      <circle cx="8" cy="15" r="1" fill="currentColor" />
-      <circle cx="12" cy="15" r="1" fill="currentColor" />
-      <circle cx="16" cy="15" r="1" fill="currentColor" />
+    <svg width="23" height="23" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="1.9" />
+      <path d="M3 10h18M8 3v4M16 3v4" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
     </svg>
   );
 }
-function TableIcon() {
+function StandingsIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="1.75" />
-      <path d="M3 9h18M3 15h18" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M9 9v9" stroke="currentColor" strokeWidth="1.5" />
+    <svg width="23" height="23" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M6 20V9M12 20V4M18 20v-7" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" />
+    </svg>
+  );
+}
+function OddsIcon() {
+  return (
+    <svg width="23" height="23" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M4 16l4.5-5.5 3.5 3L18 6" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M14 6h4v4" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
 function InsightsIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M3 17l4-6 4 3 4-7 4 4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="21" cy="11" r="1.5" fill="currentColor" />
+    <svg width="23" height="23" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="12" cy="12" r="8.4" stroke="currentColor" strokeWidth="1.9" />
+      <path d="M12 12V6M12 12l4.5 2.6" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
     </svg>
   );
 }
 
-/* ============================================================
+/* ══════════════════════════════════════════════════════
    HELPERS
-   ============================================================ */
+══════════════════════════════════════════════════════ */
 interface DayGroup {
   key: string;
-  label: string;
   shortLabel: string;
   isToday: boolean;
   matches: FixtureProjection[];
@@ -599,15 +891,14 @@ function groupByDay(fixtures: FixtureProjection[]): DayGroup[] {
   const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const map = new Map<string, DayGroup>();
 
-  for (let offset = -2; offset <= 0; offset++) {
+  /* seed yesterday, today */
+  for (let offset = -1; offset <= 0; offset++) {
     const d = new Date(todayMidnight);
     d.setDate(todayMidnight.getDate() + offset);
     const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
     const isToday = offset === 0;
-    const shortLabel = offset === -2
-      ? d.toLocaleDateString("en-US", { weekday: "short", day: "numeric" })
-      : offset === -1 ? "Yesterday" : "Today";
-    map.set(key, { key, label: shortLabel, shortLabel, isToday, matches: [] });
+    const shortLabel = offset === -1 ? "Yesterday" : "Today";
+    map.set(key, { key, shortLabel, isToday, matches: [] });
   }
 
   const sorted = [...fixtures].sort((a, b) => {
@@ -622,7 +913,7 @@ function groupByDay(fixtures: FixtureProjection[]): DayGroup[] {
     const isToday = d ? sameDay(d, now) : false;
 
     if (!d) {
-      if (!map.has("tbd")) map.set("tbd", { key: "tbd", label: "TBD", shortLabel: "TBD", isToday: false, matches: [] });
+      if (!map.has("tbd")) map.set("tbd", { key: "tbd", shortLabel: "TBD", isToday: false, matches: [] });
       map.get("tbd")!.matches.push(f);
       continue;
     }
@@ -633,7 +924,7 @@ function groupByDay(fixtures: FixtureProjection[]): DayGroup[] {
       );
       const shortLabel = dayDiff === 1 ? "Tomorrow"
         : d.toLocaleDateString("en-US", { weekday: "short", day: "numeric" });
-      map.set(key, { key, label: shortLabel, shortLabel, isToday, matches: [] });
+      map.set(key, { key, shortLabel, isToday, matches: [] });
     }
     map.get(key)!.matches.push(f);
   }
@@ -644,7 +935,8 @@ function groupByDay(fixtures: FixtureProjection[]): DayGroup[] {
       if (b === "tbd") return -1;
       return a < b ? -1 : a > b ? 1 : 0;
     })
-    .map(([, g]) => g);
+    .map(([, g]) => g)
+    .filter((g) => g.matches.length > 0 || g.isToday);
 }
 
 function sameDay(a: Date, b: Date) {
@@ -652,4 +944,3 @@ function sameDay(a: Date, b: Date) {
     && a.getMonth() === b.getMonth()
     && a.getDate() === b.getDate();
 }
-
