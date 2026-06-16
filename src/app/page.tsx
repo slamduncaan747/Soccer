@@ -117,7 +117,7 @@ export default function Page() {
         if (played > maxPlayed) maxPlayed = played;
       }
     }
-    return maxPlayed > 0 ? `MATCHDAY ${maxPlayed + 1}` : "GROUP STAGE";
+    return maxPlayed > 0 ? `MATCHDAY ${maxPlayed + 1}` : "WC 2026";
   }, [data]);
 
   return (
@@ -127,7 +127,7 @@ export default function Page() {
           <div className="brand-bar">
             <div className="brand-inner">
               <div className="brand-tick" />
-              <span className="brand-mark">THE GROUP STAGE</span>
+              <span className="brand-mark">{tab === "games" ? "LIVE SCORES" : "STANDINGS"}</span>
             </div>
             <span className="brand-badge">{matchdayBadge}</span>
           </div>
@@ -341,18 +341,24 @@ function MatchRow({ fixture: f }: { fixture: FixtureProjection }) {
         </div>
       </div>
 
-      {/* odds bar + inline percentage labels */}
+      {/* odds bar + segment-aligned percentage labels */}
       {!finished && hasOdds && (
         <div className="mc-odds-wrap">
           <div className="mc-odds-bar">
-            <span className="ob-home" style={{ width: `${hp}%` }} />
+            <span className="ob-home" style={{ width: `${hp}%`, background: playerColor(f.homeOwner) }} />
             <span className="ob-draw"  style={{ width: `${dp}%` }} />
-            <span className="ob-away"  style={{ width: `${ap}%` }} />
+            <span className="ob-away"  style={{ width: `${ap}%`, background: playerColor(f.awayOwner) }} />
           </div>
-          <div className="mc-odds-labels">
-            <span className="mc-odl-home">{hp}%</span>
-            <span className="mc-odl-draw">{dp}%</span>
-            <span className="mc-odl-away">{ap}%</span>
+          <div className="mc-odds-labels-abs">
+            {hp! >= 9 && (
+              <span className="mc-odl" style={{ left: `${hp! / 2}%`, color: playerColor(f.homeOwner) }}>{hp}%</span>
+            )}
+            {dp! >= 13 && (
+              <span className="mc-odl" style={{ left: `${hp! + dp! / 2}%`, color: "var(--dim)" }}>{dp}%</span>
+            )}
+            {ap! >= 9 && (
+              <span className="mc-odl" style={{ left: `${100 - ap! / 2}%`, color: playerColor(f.awayOwner) }}>{ap}%</span>
+            )}
           </div>
         </div>
       )}
@@ -369,13 +375,19 @@ function StandingsTab({ players }: { players: PlayerProjection[] }) {
     [players]
   );
   const maxPts = Math.max(...sorted.map((p) => p.currentPoints), 1);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (name: string) => setExpanded((prev) => {
+    const n = new Set(prev);
+    n.has(name) ? n.delete(name) : n.add(name);
+    return n;
+  });
 
   return (
     <div>
       <div className="standings-head">
         <span>#</span>
         <span>PLAYER</span>
-        <span>W-D-L · ALIVE</span>
+        <span className="r">GP</span>
         <span className="r">PTS</span>
       </div>
       <div className="standings-body">
@@ -384,35 +396,53 @@ function StandingsTab({ players }: { players: PlayerProjection[] }) {
           const totalW = p.teams.reduce((s, t) => s + t.w, 0);
           const totalD = p.teams.reduce((s, t) => s + t.d, 0);
           const totalL = p.teams.reduce((s, t) => s + t.l, 0);
-          const alive = p.teams.filter((t) => isAlive(t.expectedRemainingWins)).length;
+          const gp = totalW + totalD + totalL;
           const pctFill = maxPts > 0 ? (p.currentPoints / maxPts) * 100 : 0;
+          const isExp = expanded.has(p.player);
           return (
-            <div key={p.player} className={`s-row${lead ? " lead" : ""}`}>
-              <span className="s-rank">{i + 1}</span>
-              <div className="s-info">
-                <div className="s-name-row">
-                  {dn(p.player)}
-                  {lead && <span className="s-leader-tag">LEADER</span>}
+            <div key={p.player} className={`s-row${lead ? " lead" : ""}${isExp ? " s-row-open" : ""}`}
+              onClick={() => toggle(p.player)} role="button" tabIndex={0}
+              onKeyDown={(e) => e.key === "Enter" && toggle(p.player)}>
+              <div className="s-row-main">
+                <span className="s-rank">{i + 1}</span>
+                <div className="s-info">
+                  <div className="s-name-row">
+                    {dn(p.player)}
+                    {lead && <span className="s-leader-tag">LEADER</span>}
+                    <span className="s-caret">{isExp ? "▾" : "▸"}</span>
+                  </div>
+                  <div className="s-track">
+                    <span className="s-track-fill" style={{ width: `${pctFill}%` }} />
+                  </div>
                 </div>
-                <div className="s-track">
-                  <span className="s-track-fill" style={{ width: `${pctFill}%` }} />
-                </div>
+                <span className="s-gp">{gp}</span>
+                <span className="s-pts">{p.currentPoints}</span>
               </div>
-              <span className="s-rec">
-                <span className="bright">{totalW}</span><span className="dim">W</span>{" "}
-                <span className="bright">{totalD}</span><span className="dim">D</span>{" "}
-                <span className="bright">{totalL}</span><span className="dim">L</span>{" · "}
-                <span className="bright">{alive}</span> alive
-              </span>
-              <span className="s-pts">{p.currentPoints}</span>
+              {isExp && (
+                <div className="s-teams" onClick={(e) => e.stopPropagation()}>
+                  {p.teams.map((t) => {
+                    const alive = isAlive(t.expectedRemainingWins);
+                    return (
+                      <div key={t.team} className={`s-team-row${alive ? "" : " s-team-elim"}`}>
+                        <Flag team={t.team} height={18} />
+                        <span className="s-team-name">{t.team}</span>
+                        <span className="s-team-rec">
+                          <span className="bright">{t.w}</span><span className="dim">W</span>
+                          {"-"}<span className="bright">{t.d}</span><span className="dim">D</span>
+                          {"-"}<span className="bright">{t.l}</span><span className="dim">L</span>
+                        </span>
+                        <span className={`s-team-status${alive ? " alive" : " elim"}`}>
+                          {alive ? "●" : "○"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })}
       </div>
-      <p className="standings-foot">
-        3 pts per win · 1 per draw · 0 for loss · {players[0]?.teams.length ?? 8} teams each.
-        ALIVE = teams not yet eliminated.
-      </p>
     </div>
   );
 }
@@ -485,18 +515,12 @@ function OddsTab({ players, iterations, oddsHistory }: {
       return { history: hist, xLabels: mdLabels };
     }
 
-    // Fallback: linear interpolation Draft → Now (4 points)
+    // Fallback: just Draft → Now (honest 2-point line, no fabricated intermediates)
     const hist: Record<string, number[]> = {};
     for (const p of players) {
-      const end = p.pFirst;
-      hist[p.player] = [
-        start,
-        start + (end - start) * (1 / 3),
-        start + (end - start) * (2 / 3),
-        end,
-      ];
+      hist[p.player] = [start, p.pFirst];
     }
-    return { history: hist, xLabels: ["Draft", "MD1", "MD2", "Now"] };
+    return { history: hist, xLabels: ["Draft", "Now"] };
   }, [players, oddsHistory]);
 
   const maxY = useMemo(
@@ -684,36 +708,64 @@ function OddsTab({ players, iterations, oddsHistory }: {
           const isDim = isolated && isolated !== p.player;
           const isOn = isolated === p.player;
           const maxPF = sorted[0]?.pFirst ?? 0.01;
+          const se = mcSE(p.pFirst, iterations);
+          const maxFD = Math.max(...p.finishDistribution);
           return (
-            <button
-              key={p.player}
-              className={`v3-orow${isLead ? " lead" : ""}${isDim ? " iso-dim" : ""}${isOn ? " iso-on" : ""}`}
-              onClick={() => setIsolated(isOn ? null : p.player)}
-            >
-              <span className="v3-orank">{i + 1}</span>
-              <span className="v3-swatch" style={{ background: playerColor(p.player) }} />
-              <span className="v3-oname">{dn(p.player)}</span>
-              <div className="v3-otrack">
-                <span
-                  className="v3-ofill"
-                  style={{
-                    width: `${(p.pFirst / maxPF) * 100}%`,
-                    background: playerColor(p.player),
-                  }}
-                />
-              </div>
-              <span className="v3-opct" style={isLead ? {} : {}}>
-                {Math.round(p.pFirst * 100)}<i>%</i>
-              </span>
-            </button>
+            <div key={p.player} className="v3-oitem">
+              <button
+                className={`v3-orow${isLead ? " lead" : ""}${isDim ? " iso-dim" : ""}${isOn ? " iso-on" : ""}`}
+                onClick={() => setIsolated(isOn ? null : p.player)}
+              >
+                <span className="v3-orank">{i + 1}</span>
+                <span className="v3-swatch" style={{ background: playerColor(p.player) }} />
+                <div className="v3-oname-col">
+                  <span className="v3-oname">{dn(p.player)}</span>
+                  <span className="v3-oexp-note">exp {round1(p.expectedFinalPoints)} pts</span>
+                </div>
+                <div className="v3-otrack">
+                  <span className="v3-ofill" style={{ width: `${(p.pFirst / maxPF) * 100}%`, background: playerColor(p.player) }} />
+                </div>
+                <span className="v3-opct">
+                  {Math.round(p.pFirst * 100)}<i>%</i>
+                </span>
+              </button>
+              {isOn && (
+                <div className="v3-oexpand">
+                  <div className="v3-oexp-header">
+                    <span className="v3-oexp-se">±{Math.round(se * 1000) / 10}% confidence</span>
+                    <span className="v3-oexp-se">finish distribution</span>
+                  </div>
+                  <div className="v3-fdist">
+                    {p.finishDistribution.map((pv, fi) => (
+                      <div key={fi} className="v3-fdist-col">
+                        <div className="v3-fdist-bar" style={{
+                          height: `${maxFD > 0 ? Math.max(pv / maxFD * 100, 4) : 4}%`,
+                          background: fi === 0 ? playerColor(p.player) : `rgba(255,255,255,${0.08 + 0.12 * (1 - fi / 5)})`,
+                        }} />
+                        <span className="v3-fdist-lbl">#{fi + 1}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="v3-oexp-teams">
+                    {p.teams.map((t) => {
+                      const alive = isAlive(t.expectedRemainingWins);
+                      return (
+                        <div key={t.team} className={`v3-oexp-team${alive ? "" : " dim"}`}>
+                          <Flag team={t.team} height={16} />
+                          <span className="v3-oexp-tname">{abbr(t.team)}</span>
+                          <span className="v3-oexp-trec">{t.w}-{t.d}-{t.l}</span>
+                          <span className={`v3-oexp-talive${alive ? " alive" : " elim"}`}>{alive ? "●" : "○"}</span>
+                          <span className="v3-oexp-tpts">{round1(t.expectedFinalPoints)}<i>exp</i></span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
           );
         })}
       </div>
-
-      <p className="odds-foot">
-        Chance of finishing 1st across {Math.round(iterations / 1000)}k simulated tournaments.
-        ± is Monte-Carlo margin of error.
-      </p>
     </div>
   );
 }
@@ -727,6 +779,7 @@ function InsightsTab({ players, fixtures, playerFactors }: {
   playerFactors: PlayerFactors[];
 }) {
   const ranked = useMemo(() => [...players].sort((a, b) => b.pFirst - a.pFirst), [players]);
+  const pFirstMap = useMemo(() => Object.fromEntries(players.map((p) => [p.player, p.pFirst])), [players]);
   const [who, setWho] = useState<string>(ranked[0]?.player ?? "");
 
   /* today's games (or next day), ranked by swing */
@@ -763,7 +816,7 @@ function InsightsTab({ players, fixtures, playerFactors }: {
             <span>{dayLabel || "Upcoming"}</span>
             <span className="v3-card-s">biggest movers</span>
           </div>
-          {games.slice(0, 3).map((f) => <SwingRow key={f.id} f={f} />)}
+          {games.slice(0, 3).map((f) => <SwingRow key={f.id} f={f} pFirstMap={pFirstMap} />)}
         </div>
       )}
 
@@ -808,20 +861,19 @@ function InsightsTab({ players, fixtures, playerFactors }: {
         )}
       </div>
 
-      <MethodNote />
     </div>
   );
 }
 
-function SwingRow({ f }: { f: FixtureProjection }) {
+function SwingRow({ f, pFirstMap }: { f: FixtureProjection; pFirstMap: Record<string, number> }) {
   const d = f.kickoff ? new Date(f.kickoff) : null;
   const time = d ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "";
   const ps = (f.playerSwings ?? [])[0];
   const homeHigher = ps ? ps.pHome >= ps.pAway : true;
   const goodTeam = homeHigher ? f.home : f.away;
-  const lo = ps ? Math.min(ps.pHome, ps.pAway) : 0;
   const hi = ps ? Math.max(ps.pHome, ps.pAway) : 0;
-  const delta = Math.round((hi - lo) * 100);
+  const current = ps ? (pFirstMap[ps.player] ?? Math.min(ps.pHome, ps.pAway)) : 0;
+  const delta = Math.round((hi - current) * 100);
 
   if (!ps || f.swing < 0.005) return null;
 
@@ -837,7 +889,7 @@ function SwingRow({ f }: { f: FixtureProjection }) {
       <div className="v3-sw-r">
         <span className="v3-sw-who">{dn(ps.player)}</span>
         <span className="v3-sw-move">
-          {Math.round(lo * 100)}→{Math.round(hi * 100)}% <i>+{delta}</i>
+          {Math.round(current * 100)}%→{Math.round(hi * 100)}% <i>{delta >= 0 ? "+" : ""}{delta}</i>
         </span>
       </div>
     </div>
@@ -862,30 +914,6 @@ function FactorRow({ f }: { f: TournamentFactor }) {
   );
 }
 
-function MethodNote() {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="method-note">
-      <button className="method-toggle" onClick={() => setOpen((v) => !v)}>
-        <span>How these numbers work</span>
-        <span className="method-caret">{open ? "▲" : "▼"}</span>
-      </button>
-      {open && (
-        <div className="method-body">
-          <p>
-            Score = <strong>3 points per match a team you own wins, 1 per draw</strong>. We run thousands of
-            simulated tournaments off live <strong>Kalshi market odds</strong> — group games and
-            each team&apos;s knockout run.
-          </p>
-          <p>
-            <strong>Odds</strong> = how often you finish 1st. A <strong>swing</strong> is how much
-            one result moves those odds, from the same sims.
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
 
 /* ══════════════════════════════════════════════════════
    TAB ICONS
