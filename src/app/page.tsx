@@ -79,10 +79,22 @@ const isAlive = (erw: number) => erw >= 0.05;
 function isLiveByTime(kickoff: string | undefined): boolean {
   if (!kickoff) return false;
   const ms = Date.now() - new Date(kickoff).getTime();
-  return ms > 0 && ms < 115 * 60 * 1000;
+  return ms > 0 && ms < 120 * 60 * 1000;
 }
-function liveMinute(kickoff: string): number {
-  return Math.floor((Date.now() - new Date(kickoff).getTime()) / 60000);
+
+function liveDisplayTime(
+  apiMinute: number | undefined,
+  status: string | undefined,
+  kickoff: string | undefined
+): string | null {
+  if (status === "HALFTIME") return "HT";
+  if (apiMinute != null && apiMinute > 0) return `${apiMinute}'`;
+  if (!kickoff) return null;
+  const elapsed = Math.floor((Date.now() - new Date(kickoff).getTime()) / 60000);
+  if (elapsed <= 0) return null;
+  if (elapsed <= 52) return `${Math.min(elapsed, 45)}'`;
+  if (elapsed <= 65) return "HT";
+  return `${Math.min(elapsed - 15, 90)}'`;
 }
 
 /* ──────────────────────────────────────────────────────
@@ -233,13 +245,13 @@ function GamesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
 }
 
 function ScoreBug({ fixture: f }: { fixture: FixtureProjection }) {
-  const minute = f.liveMinute ?? (f.kickoff ? liveMinute(f.kickoff) : null);
+  const minuteStr = liveDisplayTime(f.liveMinute, f.liveStatus, f.kickoff);
   const score = f.liveScore ?? { home: 0, away: 0 };
   return (
     <div className="score-bug">
       <div className="bug-tag">
         <span className="bug-live-dot" />
-        LIVE{minute !== null ? ` · ${minute}'` : ""}
+        LIVE{minuteStr ? ` · ${minuteStr}` : ""}
       </div>
       <div className="bug-row">
         <div className="bug-team">
@@ -281,9 +293,7 @@ function MatchRow({ fixture: f }: { fixture: FixtureProjection }) {
   const live = !finished && (f.liveStatus != null
     ? f.liveStatus !== "FINISHED"
     : isLiveByTime(f.kickoff));
-  const minute = live && f.kickoff
-    ? (f.liveMinute ?? liveMinute(f.kickoff))
-    : null;
+  const minuteStr = live ? liveDisplayTime(f.liveMinute, f.liveStatus, f.kickoff) : null;
 
   return (
     <div className={`match-card${finished ? " done" : ""}`}>
@@ -306,12 +316,10 @@ function MatchRow({ fixture: f }: { fixture: FixtureProjection }) {
             </>
           ) : live ? (
             <>
-              <span className="mc-live-badge">LIVE</span>
-              {f.liveScore ? (
+              <span className="mc-live-badge">{minuteStr ?? "LIVE"}</span>
+              {f.liveScore && (
                 <span className="mc-live-score">{f.liveScore.home}–{f.liveScore.away}</span>
-              ) : minute !== null ? (
-                <span className="mc-live-min">{minute}&apos;</span>
-              ) : null}
+              )}
             </>
           ) : (
             <span className="mc-time">{timeStr}</span>
