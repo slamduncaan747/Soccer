@@ -959,6 +959,37 @@ body {
 
 
 /* ──────────────────────────────────────
+   PULL TO REFRESH
+────────────────────────────────────── */
+.ptr-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: height 0.2s ease;
+  background: var(--bg);
+  flex-shrink: 0;
+}
+.ptr-arrow {
+  font-size: 18px;
+  color: var(--dim);
+  transition: transform 0.2s ease;
+  line-height: 1;
+  user-select: none;
+}
+.ptr-spin {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--panel2);
+  border-top-color: var(--acc);
+  border-radius: 50%;
+  animation: ptrSpin 0.7s linear infinite;
+}
+@keyframes ptrSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* ──────────────────────────────────────
    STATES
 ────────────────────────────────────── */
 .loading-state {

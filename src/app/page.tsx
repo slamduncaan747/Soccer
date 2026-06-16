@@ -100,10 +100,16 @@ function liveDisplayTime(
 /* ──────────────────────────────────────────────────────
    ROOT
 ────────────────────────────────────────────────────── */
+const PULL_TRIGGER = 64;
+const PULL_MAX = 80;
+
 export default function Page() {
   const [data, setData]   = useState<ProjectionResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab]     = useState<Tab>("games");
+  const [pullDist, setPullDist] = useState(0);
+  const touchStartY = useRef(-1);
+  const pulling = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -119,9 +125,42 @@ export default function Page() {
 
   useEffect(() => { load(); }, [load]);
 
+  const onTouchStart = useCallback((e: React.TouchEvent) => {
+    if (document.documentElement.scrollTop === 0) {
+      touchStartY.current = e.touches[0].clientY;
+      pulling.current = true;
+    }
+  }, []);
+
+  const onTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!pulling.current || loading) return;
+    const dy = e.touches[0].clientY - touchStartY.current;
+    if (dy > 0) setPullDist(Math.min(dy * 0.45, PULL_MAX));
+    else { pulling.current = false; setPullDist(0); }
+  }, [loading]);
+
+  const onTouchEnd = useCallback(() => {
+    if (!pulling.current) return;
+    pulling.current = false;
+    if (pullDist >= PULL_TRIGGER) load();
+    setPullDist(0);
+    touchStartY.current = -1;
+  }, [pullDist, load]);
+
+  const showPTR = pullDist > 0 || loading;
+  const ptrH = loading ? 44 : pullDist;
+  const triggered = pullDist >= PULL_TRIGGER;
 
   return (
-    <>
+    <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+      {/* pull-to-refresh indicator */}
+      <div className="ptr-bar" style={{ height: showPTR ? ptrH : 0 }}>
+        {loading
+          ? <span className="ptr-spin" />
+          : <span className="ptr-arrow" style={{ transform: `rotate(${triggered ? 180 : 0}deg)` }}>↓</span>
+        }
+      </div>
+
       <header className="app-header">
         {tab === "games" || tab === "standings" ? (
           <div className="brand-bar">
@@ -182,7 +221,7 @@ export default function Page() {
           <InsightsIcon /> Insights
         </button>
       </nav>
-    </>
+    </div>
   );
 }
 
