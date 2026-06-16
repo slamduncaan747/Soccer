@@ -107,18 +107,6 @@ export default function Page() {
 
   useEffect(() => { load(); }, [load]);
 
-  /* current matchday from max games played across all teams */
-  const matchdayBadge = useMemo(() => {
-    if (!data) return "WC 2026";
-    let maxPlayed = 0;
-    for (const p of data.players) {
-      for (const t of p.teams) {
-        const played = t.w + t.d + t.l;
-        if (played > maxPlayed) maxPlayed = played;
-      }
-    }
-    return maxPlayed > 0 ? `MATCHDAY ${maxPlayed + 1}` : "WC 2026";
-  }, [data]);
 
   return (
     <>
@@ -129,7 +117,6 @@ export default function Page() {
               <div className="brand-tick" />
               <span className="brand-mark">{tab === "games" ? "LIVE SCORES" : "STANDINGS"}</span>
             </div>
-            <span className="brand-badge">{matchdayBadge}</span>
           </div>
         ) : tab === "odds" ? (
           <div className="brand-bar">
@@ -420,20 +407,17 @@ function StandingsTab({ players }: { players: PlayerProjection[] }) {
               </div>
               {isExp && (
                 <div className="s-teams" onClick={(e) => e.stopPropagation()}>
+                  <div className="s-teams-head">
+                    <span /><span /><span className="s-th-wdl">W — D — L</span><span />
+                  </div>
                   {p.teams.map((t) => {
                     const alive = isAlive(t.expectedRemainingWins);
                     return (
                       <div key={t.team} className={`s-team-row${alive ? "" : " s-team-elim"}`}>
                         <Flag team={t.team} height={18} />
                         <span className="s-team-name">{t.team}</span>
-                        <span className="s-team-rec">
-                          <span className="bright">{t.w}</span><span className="dim">W</span>
-                          {"-"}<span className="bright">{t.d}</span><span className="dim">D</span>
-                          {"-"}<span className="bright">{t.l}</span><span className="dim">L</span>
-                        </span>
-                        <span className={`s-team-status${alive ? " alive" : " elim"}`}>
-                          {alive ? "●" : "○"}
-                        </span>
+                        <span className="s-team-rec">{t.w}–{t.d}–{t.l}</span>
+                        <span className={`s-team-status${alive ? " alive" : " elim"}`}>{alive ? "●" : "○"}</span>
                       </div>
                     );
                   })}
@@ -736,15 +720,31 @@ function OddsTab({ players, iterations, oddsHistory }: {
                     <span className="v3-oexp-se">finish distribution</span>
                   </div>
                   <div className="v3-fdist">
-                    {p.finishDistribution.map((pv, fi) => (
-                      <div key={fi} className="v3-fdist-col">
-                        <div className="v3-fdist-bar" style={{
-                          height: `${maxFD > 0 ? Math.max(pv / maxFD * 100, 4) : 4}%`,
-                          background: fi === 0 ? playerColor(p.player) : `rgba(255,255,255,${0.08 + 0.12 * (1 - fi / 5)})`,
-                        }} />
-                        <span className="v3-fdist-lbl">#{fi + 1}</span>
-                      </div>
-                    ))}
+                    <div className="v3-fdist-bars">
+                      {p.finishDistribution.map((pv, fi) => {
+                        const barH = maxFD > 0 ? Math.max(Math.round((pv / maxFD) * 44), 2) : 2;
+                        return (
+                          <div key={fi} className="v3-fdist-col">
+                            {fi === 0 && (
+                              <span className="v3-fdist-peak">{Math.round(pv * 100)}%</span>
+                            )}
+                            <div className="v3-fdist-bar" style={{
+                              height: barH,
+                              background: fi === 0
+                                ? playerColor(p.player)
+                                : `rgba(255,255,255,${Math.max(0.07, 0.18 * (1 - fi / 5))})`,
+                            }} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="v3-fdist-lbls">
+                      {p.finishDistribution.map((pv, fi) => (
+                        <span key={fi} className="v3-fdist-lbl">
+                          #{fi + 1}{fi > 0 ? <i>{Math.round(pv * 100)}%</i> : null}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                   <div className="v3-oexp-teams">
                     {p.teams.map((t) => {
