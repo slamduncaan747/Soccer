@@ -3,6 +3,7 @@ import { fetchAllWCMatches, mergeRecords, ScheduledMatch } from "./footballData"
 import { fetchGroupFixtures, fetchKnockoutOdds } from "./kalshi";
 import { mockGroupFixtures, mockKnockoutOdds } from "./mockOdds";
 import { runProjection } from "./engine";
+import { computeLuck, PlayedMatch } from "./luck";
 import { GroupFixture, ProjectionResult, FixtureProjection } from "./types";
 import { snapshotOdds, readOddsHistory } from "./supabase";
 
@@ -130,6 +131,14 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
 
     result.fixtures = [...result.fixtures, ...finishedProjections];
   }
+
+  // ── 6b) Luck: actual vs expected points so far ────────────────
+  // Use finished matches (when we have them) to know real opponents; the model
+  // otherwise assumes an average-strength opponent for each game played.
+  const playedMatches: PlayedMatch[] = (fdSchedule ?? [])
+    .filter((m) => m.status === "FINISHED")
+    .map((m) => ({ home: m.home, away: m.away }));
+  result.luck = computeLuck(records, playedMatches);
 
   // ── 7) Determine current matchday (max games played by any team) ─
   const matchday = records.reduce((max, t) => Math.max(max, t.w + t.d + t.l), 0);
