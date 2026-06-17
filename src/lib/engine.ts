@@ -436,7 +436,6 @@ export function runProjection(input: EngineInput): ProjectionResult {
     players: playerProjections,
     fixtures: fixtureProjections,
     playerFactors,
-    luck: [], // computed by the orchestrator, which holds the live records
     status: {
       // Sources are filled in by the orchestrator, which knows the real feed
       // outcome; the engine only knows the counts it was handed.

@@ -23,16 +23,6 @@ function strength(team: string): number {
   return STRENGTH[team] ?? 0.5;
 }
 
-// Public accessor for the per-team strength rating, reused by the luck model.
-export function teamStrength(team: string): number {
-  return strength(team);
-}
-
-// Mean strength across the whole field — the "average opponent" baseline used
-// when a team's actual opponent for a played match is unknown.
-export const AVG_STRENGTH: number =
-  ALL_TEAMS.reduce((s, t) => s + strength(t.name), 0) / (ALL_TEAMS.length || 1);
-
 // Build a plausible set of remaining group fixtures by pairing pool teams.
 export function mockGroupFixtures(): GroupFixture[] {
   const rng = mulberry32(42);

@@ -1,9 +1,9 @@
 "use client";
 
 import { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ProjectionResult, PlayerProjection, FixtureProjection, PlayerFactors, TournamentFactor, OddsHistoryPoint, PlayerLuck } from "@/lib/types";
+import type { ProjectionResult, PlayerProjection, FixtureProjection, PlayerFactors, TournamentFactor, OddsHistoryPoint } from "@/lib/types";
 
-type Tab = "games" | "standings" | "odds" | "insights" | "luck";
+type Tab = "games" | "standings" | "odds" | "insights";
 
 /* ── display names ── */
 const DISPLAY_NAME: Record<string, string> = { Isiah: "Zeke" };
@@ -177,14 +177,6 @@ export default function Page() {
             </div>
             {data && <span className="brand-badge">{Math.round(data.iterations / 1000)}K SIMS</span>}
           </div>
-        ) : tab === "luck" ? (
-          <div className="brand-bar">
-            <div className="brand-inner">
-              <div className="brand-tick" />
-              <span className="brand-mark">LUCK INDEX</span>
-            </div>
-            <span className="brand-badge">vs EXPECTED</span>
-          </div>
         ) : (
           <div className="brand-bar">
             <div className="brand-inner">
@@ -211,7 +203,6 @@ export default function Page() {
             {tab === "standings"  && <StandingsTab players={data.players} />}
             {tab === "odds"       && <OddsTab      players={data.players} iterations={data.iterations} oddsHistory={data.oddsHistory} />}
             {tab === "insights"   && <InsightsTab  players={data.players} fixtures={data.fixtures} playerFactors={data.playerFactors} />}
-            {tab === "luck"       && <LuckTab      luck={data.luck} />}
           </div>
         )}
       </main>
@@ -228,9 +219,6 @@ export default function Page() {
         </button>
         <button className={`tab-btn${tab === "insights" ? " active" : ""}`} onClick={() => setTab("insights")}>
           <InsightsIcon /> Insights
-        </button>
-        <button className={`tab-btn${tab === "luck" ? " active" : ""}`} onClick={() => setTab("luck")}>
-          <LuckIcon /> Luck
         </button>
       </nav>
     </div>
@@ -975,139 +963,6 @@ function FactorRow({ f }: { f: TournamentFactor }) {
 
 
 /* ══════════════════════════════════════════════════════
-   LUCK TAB — performance vs. expectation
-══════════════════════════════════════════════════════ */
-const sign = (n: number) => (n >= 0 ? "+" : "") + n.toFixed(1);
-
-function LuckTab({ luck }: { luck: PlayerLuck[] }) {
-  const sorted = useMemo(() => [...luck].sort((a, b) => b.luck - a.luck), [luck]);
-  const maxAbs = useMemo(
-    () => Math.max(0.5, ...sorted.map((p) => Math.abs(p.luck))),
-    [sorted]
-  );
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const toggle = (name: string) => setExpanded((prev) => {
-    const n = new Set(prev);
-    n.has(name) ? n.delete(name) : n.add(name);
-    return n;
-  });
-
-  const played = sorted.some((p) => p.gamesPlayed > 0);
-  const luckiest = sorted[0];
-  const unluckiest = sorted[sorted.length - 1];
-
-  return (
-    <div className="luck-screen">
-      {/* explainer */}
-      <div className="luck-explain">
-        <span className="luck-explain-t">Who&apos;s riding their luck?</span>
-        <span className="luck-explain-s">
-          Points banked minus the points a pre-match strength model expected from
-          the same games. Above the line = over-performing (lucky); below = robbed.
-        </span>
-      </div>
-
-      {/* highlight chips */}
-      {played && luckiest && unluckiest && luckiest.player !== unluckiest.player && (
-        <div className="luck-chips">
-          <div className="luck-chip pos">
-            <span className="luck-chip-lab">LUCKIEST</span>
-            <span className="luck-chip-name">{dn(luckiest.player)}</span>
-            <span className="luck-chip-val">{sign(luckiest.luck)}</span>
-          </div>
-          <div className="luck-chip neg">
-            <span className="luck-chip-lab">UNLUCKIEST</span>
-            <span className="luck-chip-name">{dn(unluckiest.player)}</span>
-            <span className="luck-chip-val">{sign(unluckiest.luck)}</span>
-          </div>
-        </div>
-      )}
-
-      {!played ? (
-        <div className="empty-state">
-          No games played yet — luck shows up once results roll in.
-        </div>
-      ) : (
-        <div className="luck-list">
-          {sorted.map((p, i) => {
-            const isExp = expanded.has(p.player);
-            const pos = p.luck >= 0;
-            const fillPct = (Math.abs(p.luck) / maxAbs) * 50;
-            return (
-              <div key={p.player} className={`luck-row${isExp ? " open" : ""}`}
-                onClick={() => toggle(p.player)} role="button" tabIndex={0}
-                onKeyDown={(e) => e.key === "Enter" && toggle(p.player)}>
-                <div className="luck-main">
-                  <span className="luck-rank">{i + 1}</span>
-                  <div className="luck-info">
-                    <div className="luck-name-row">
-                      <span className="luck-name">{dn(p.player)}</span>
-                      <span className="luck-caret">{isExp ? "▾" : "▸"}</span>
-                    </div>
-                    {/* diverging bar, zero in the middle */}
-                    <div className="luck-bar">
-                      <span className="luck-bar-zero" />
-                      <span
-                        className={`luck-bar-fill ${pos ? "pos" : "neg"}`}
-                        style={pos
-                          ? { left: "50%", width: `${fillPct}%` }
-                          : { right: "50%", width: `${fillPct}%` }}
-                      />
-                    </div>
-                  </div>
-                  <div className="luck-num">
-                    <span className={`luck-coef ${pos ? "pos" : "neg"}`}>{sign(p.luck)}</span>
-                    <span className="luck-sub">{sign(p.luckPerGame)}/gm</span>
-                  </div>
-                </div>
-
-                {isExp && (
-                  <div className="luck-detail" onClick={(e) => e.stopPropagation()}>
-                    <div className="luck-detail-stats">
-                      <div className="luck-stat">
-                        <span className="luck-stat-v">{p.actualPoints}</span>
-                        <span className="luck-stat-l">actual pts</span>
-                      </div>
-                      <div className="luck-stat">
-                        <span className="luck-stat-v">{round1(p.expectedPoints)}</span>
-                        <span className="luck-stat-l">expected</span>
-                      </div>
-                      <div className="luck-stat">
-                        <span className="luck-stat-v">{p.luckIndex.toFixed(2)}×</span>
-                        <span className="luck-stat-l">index</span>
-                      </div>
-                      <div className="luck-stat">
-                        <span className="luck-stat-v">{p.gamesPlayed}</span>
-                        <span className="luck-stat-l">games</span>
-                      </div>
-                    </div>
-                    <div className="luck-teams">
-                      {p.teams.filter((t) => t.gamesPlayed > 0).map((t) => {
-                        const tp = t.luck >= 0;
-                        return (
-                          <div key={t.team} className="luck-team">
-                            <Flag team={t.team} height={16} />
-                            <span className="luck-team-name">{abbr(t.team)}</span>
-                            <span className="luck-team-rec">
-                              {t.actualPoints}<i> / {round1(t.expectedPoints)} xpt</i>
-                            </span>
-                            <span className={`luck-team-d ${tp ? "pos" : "neg"}`}>{sign(t.luck)}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ══════════════════════════════════════════════════════
    TAB ICONS
 ══════════════════════════════════════════════════════ */
 function GamesIcon() {
@@ -1138,17 +993,6 @@ function InsightsIcon() {
     <svg width="23" height="23" viewBox="0 0 24 24" fill="none" aria-hidden>
       <circle cx="12" cy="12" r="8.4" stroke="currentColor" strokeWidth="1.9" />
       <path d="M12 12V6M12 12l4.5 2.6" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-    </svg>
-  );
-}
-function LuckIcon() {
-  return (
-    <svg width="23" height="23" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <rect x="4" y="4" width="16" height="16" rx="4" stroke="currentColor" strokeWidth="1.9" />
-      <circle cx="9" cy="9" r="1.4" fill="currentColor" />
-      <circle cx="15" cy="15" r="1.4" fill="currentColor" />
-      <circle cx="15" cy="9" r="1.4" fill="currentColor" />
-      <circle cx="9" cy="15" r="1.4" fill="currentColor" />
     </svg>
   );
 }

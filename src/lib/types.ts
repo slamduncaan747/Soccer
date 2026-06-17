@@ -123,37 +123,10 @@ export interface OddsHistoryPoint {
   pct: number;      // 0–1 title odds
 }
 
-// ── Luck model ─────────────────────────────────────────────────────────────
-// "Luck" = how a team/player has performed RELATIVE to expectation. We compare
-// the points actually banked so far against the points a pre-match strength
-// model says the games played "should" have yielded. Positive = over-performing
-// (lucky), negative = under-performing (unlucky).
-
-export interface TeamLuck {
-  team: string;
-  owner: string;
-  gamesPlayed: number;
-  actualPoints: number;    // points banked from results so far
-  expectedPoints: number;  // model expectation for those same games
-  luck: number;            // actualPoints − expectedPoints
-}
-
-export interface PlayerLuck {
-  player: string;
-  gamesPlayed: number;
-  actualPoints: number;
-  expectedPoints: number;
-  luck: number;            // total points above (+) / below (−) expectation
-  luckPerGame: number;     // luck ÷ gamesPlayed — the comparable "coefficient"
-  luckIndex: number;       // actualPoints ÷ expectedPoints (1 = exactly as expected)
-  teams: TeamLuck[];       // per-team contributions, luckiest first
-}
-
 export interface ProjectionResult {
   players: PlayerProjection[];
   fixtures: FixtureProjection[];    // all group matches (finished + remaining)
   playerFactors: PlayerFactors[];   // per-player high-variance knockout what-ifs
-  luck: PlayerLuck[];               // performance vs. expectation, luckiest first
   status: DataStatus;
   iterations: number;
   generatedAt: string;
