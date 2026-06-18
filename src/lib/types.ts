@@ -121,6 +121,7 @@ export interface DataStatus {
 export interface OddsHistoryPoint {
   matchday: number; // -1 = draft, 0 = start, 1 = after MD1, etc.
   pct: number;      // 0–1 title odds
+  pts: number;      // expected final points (projected end-of-tournament total)
 }
 
 export interface ProjectionResult {

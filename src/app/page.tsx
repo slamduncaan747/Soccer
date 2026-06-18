@@ -571,29 +571,53 @@ const TIMELINE = ["Draft", "MD1", "MD2", "Now"];
 function xAt(i: number) { return PAD_X + (i / (TIMELINE.length - 1)) * (CHART_W - PAD_X * 2); }
 function yAt(v: number, mY: number) { return PAD_T + (1 - v / mY) * (CHART_H - PAD_T - PAD_B); }
 
+// The chart can plot either tracked metric.
+type Metric = "odds" | "points";
+const fmtVal = (v: number, m: Metric) =>
+  m === "odds" ? `${Math.round(v * 100)}%` : `${round1(v)}`;
+
 function OddsTab({ players, iterations, oddsHistory }: {
   players: PlayerProjection[];
   iterations: number;
   oddsHistory: Record<string, OddsHistoryPoint[]>;
 }) {
   const [isolated, setIsolated] = useState<string | null>(null);
+  const [metric, setMetric] = useState<Metric>("odds");
   const [frame, setFrame] = useState({ idx: 999, isNow: true }); // 999 = clamp to lastIdx on first render
   const isDragging = useRef(false);
   const plotRef = useRef<HTMLDivElement>(null);
 
-  const sorted = useMemo(
-    () => [...players].sort((a, b) => b.pFirst - a.pFirst),
-    [players]
+  // Live value for the active metric: title odds or expected final points.
+  const liveVal = useCallback(
+    (p: PlayerProjection) => (metric === "odds" ? p.pFirst : p.expectedFinalPoints),
+    [metric]
   );
 
-  // Use real Supabase history when available; fall back to linear interpolation.
+  const sorted = useMemo(
+    () => [...players].sort((a, b) => liveVal(b) - liveVal(a)),
+    [players, liveVal]
+  );
+
+  // Use real Supabase history when available; fall back to a 2-point line.
   // Either way, normalise to a flat number[] per player so the chart is uniform.
   const { history, xLabels } = useMemo<{
     history: Record<string, number[]>;
     xLabels: string[];
   }>(() => {
     const n = players.length || 6;
-    const start = 1 / n;
+    // For points, treat a non-positive stored value as "missing" so the view
+    // degrades to a flat current-value line until expected_points is tracked.
+    const valOf = (pt: OddsHistoryPoint): number | undefined => {
+      if (metric === "odds") return pt.pct;
+      return pt.pts > 0 ? pt.pts : undefined;
+    };
+    // Draft baseline: equal odds for the odds view; for points there is no
+    // pre-draft value, so anchor flat to each player's earliest real point.
+    const draftStart = (p: PlayerProjection) => {
+      if (metric === "odds") return 1 / n;
+      const firstReal = (oddsHistory[p.player] ?? []).map((pt) => pt.pts).find((v) => v > 0);
+      return firstReal ?? liveVal(p);
+    };
 
     // Check if we have at least 2 real data points for any player
     const hasReal = Object.values(oddsHistory).some((pts) => pts.length >= 2);
@@ -618,13 +642,17 @@ function OddsTab({ players, iterations, oddsHistory }: {
       const hist: Record<string, number[]> = {};
       for (const p of players) {
         const pts = oddsHistory[p.player] ?? [];
-        const byMD = new Map(pts.map((pt) => [pt.matchday, pt.pct]));
+        const byMD = new Map<number, number>();
+        for (const pt of pts) {
+          const v = valOf(pt);
+          if (v !== undefined) byMD.set(pt.matchday, v);
+        }
         hist[p.player] = sortedMDs.map((md) =>
-          md === -1 ? (byMD.get(-1) ?? start) : (byMD.get(md) ?? p.pFirst)
+          md === -1 ? (byMD.get(-1) ?? draftStart(p)) : (byMD.get(md) ?? liveVal(p))
         );
-        // Ensure last point = live pFirst
+        // Ensure last point = live value
         if (hist[p.player].length > 0) {
-          hist[p.player][hist[p.player].length - 1] = p.pFirst;
+          hist[p.player][hist[p.player].length - 1] = liveVal(p);
         }
       }
       return { history: hist, xLabels: mdLabels };
@@ -633,13 +661,13 @@ function OddsTab({ players, iterations, oddsHistory }: {
     // Fallback: just Draft → Now (honest 2-point line, no fabricated intermediates)
     const hist: Record<string, number[]> = {};
     for (const p of players) {
-      hist[p.player] = [start, p.pFirst];
+      hist[p.player] = [draftStart(p), liveVal(p)];
     }
     return { history: hist, xLabels: ["Draft", "Now"] };
-  }, [players, oddsHistory]);
+  }, [players, oddsHistory, metric, liveVal]);
 
   const maxY = useMemo(
-    () => Math.max(...Object.values(history).flatMap((arr) => arr)) * 1.08,
+    () => Math.max(0.0001, ...Object.values(history).flatMap((arr) => arr)) * 1.08,
     [history]
   );
 
@@ -698,7 +726,15 @@ function OddsTab({ players, iterations, oddsHistory }: {
   const labelPlayer = isolated ?? sorted[0]?.player;
   const labelV = history[labelPlayer ?? ""]?.[frameIdx] ?? 0;
 
-  const gridLines = [0.1, 0.2, 0.3].filter((g) => g <= maxY);
+  const gridLines = useMemo(() => {
+    if (metric === "odds") return [0.1, 0.2, 0.3].filter((g) => g <= maxY);
+    // Points: a few evenly-spaced round gridlines up to the max.
+    const raw = maxY / 3;
+    const step = raw <= 5 ? 5 : raw <= 10 ? 10 : Math.ceil(raw / 10) * 10;
+    const lines: number[] = [];
+    for (let g = step; g < maxY; g += step) lines.push(g);
+    return lines;
+  }, [metric, maxY]);
 
   return (
     <div className="odds-screen">
@@ -706,18 +742,40 @@ function OddsTab({ players, iterations, oddsHistory }: {
       <div className="v3-chart">
         <div className="v3-chart-h">
           <div>
-            <span className="v3-chart-t">Title odds over time</span>
+            <span className="v3-chart-t">
+              {metric === "odds" ? "Title odds over time" : "Expected points over time"}
+            </span>
             <span className="v3-chart-s">
               {frame.isNow
                 ? "Drag across · tap a name to isolate"
-                : `${xLabels[frameIdx] ?? ""} — ${dn(labelPlayer ?? "")} ${Math.round(labelV * 100)}%`}
+                : `${xLabels[frameIdx] ?? ""} — ${dn(labelPlayer ?? "")} ${fmtVal(labelV, metric)}`}
             </span>
           </div>
           {frame.isNow && labelPlayer && (
             <span className="v3-chart-now" style={{ color: playerColor(labelPlayer) }}>
-              ● {dn(labelPlayer)} {Math.round(labelV * 100)}%
+              ● {dn(labelPlayer)} {fmtVal(labelV, metric)}
             </span>
           )}
+        </div>
+
+        {/* metric toggle — both series are tracked; this picks which to plot */}
+        <div className="v3-metric-toggle" role="tablist" aria-label="Chart metric">
+          <button
+            role="tab"
+            aria-selected={metric === "odds"}
+            className={`v3-mt-btn${metric === "odds" ? " on" : ""}`}
+            onClick={() => setMetric("odds")}
+          >
+            Title odds
+          </button>
+          <button
+            role="tab"
+            aria-selected={metric === "points"}
+            className={`v3-mt-btn${metric === "points" ? " on" : ""}`}
+            onClick={() => setMetric("points")}
+          >
+            Expected points
+          </button>
         </div>
 
         <div
@@ -745,7 +803,7 @@ function OddsTab({ players, iterations, oddsHistory }: {
                   <text x={CHART_W - PAD_X} y={y - 3}
                     fill="var(--dim)" fontSize={8}
                     fontFamily="JetBrains Mono,monospace" textAnchor="end">
-                    {Math.round(g * 100)}%
+                    {fmtVal(g, metric)}
                   </text>
                 </g>
               );
@@ -822,7 +880,7 @@ function OddsTab({ players, iterations, oddsHistory }: {
           const isLead = i === 0;
           const isDim = isolated && isolated !== p.player;
           const isOn = isolated === p.player;
-          const maxPF = sorted[0]?.pFirst ?? 0.01;
+          const maxVal = sorted[0] ? liveVal(sorted[0]) : 0.01;
           const se = mcSE(p.pFirst, iterations);
           const maxFD = Math.max(...p.finishDistribution);
           return (
@@ -838,10 +896,12 @@ function OddsTab({ players, iterations, oddsHistory }: {
                   <span className="v3-oexp-note">exp {round1(p.expectedFinalPoints)} pts</span>
                 </div>
                 <div className="v3-otrack">
-                  <span className="v3-ofill" style={{ width: `${(p.pFirst / maxPF) * 100}%`, background: playerColor(p.player) }} />
+                  <span className="v3-ofill" style={{ width: `${(liveVal(p) / maxVal) * 100}%`, background: playerColor(p.player) }} />
                 </div>
                 <span className="v3-opct">
-                  {Math.round(p.pFirst * 100)}<i>%</i>
+                  {metric === "odds"
+                    ? <>{Math.round(p.pFirst * 100)}<i>%</i></>
+                    : <>{round1(p.expectedFinalPoints)}<i>pts</i></>}
                 </span>
               </button>
               {isOn && (

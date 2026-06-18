@@ -638,6 +638,32 @@ body {
   color: var(--ink);
   white-space: nowrap;
 }
+/* metric toggle (segmented control) */
+.v3-metric-toggle {
+  display: flex;
+  gap: 3px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: var(--rad);
+  padding: 3px;
+  margin-bottom: 12px;
+}
+.v3-mt-btn {
+  flex: 1;
+  font-family: 'Archivo', sans-serif;
+  font-weight: 700;
+  font-size: 11px;
+  color: var(--mut);
+  background: none;
+  border: none;
+  padding: 7px 6px;
+  border-radius: calc(var(--rad) - 3px);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, color 0.15s;
+}
+.v3-mt-btn.on { background: var(--acc); color: var(--acc-ink); }
+
 .v3-plot {
   position: relative;
   touch-action: none;
