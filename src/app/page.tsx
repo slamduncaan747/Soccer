@@ -82,8 +82,11 @@ function isLiveByTime(kickoff: string | undefined): boolean {
   return ms > 0 && ms < 130 * 60 * 1000;
 }
 
-const HALF_MIN = 45;     // minutes in a half
-const HT_BREAK_MIN = 15; // approximate halftime interval
+const HALF_MIN = 45;       // played minutes in a half
+const FH_STOPPAGE_MIN = 4; // typical first-half added time (real minutes)
+const HT_BREAK_MIN = 15;   // approximate halftime interval (real minutes)
+// Real wall-clock minute at which the second half is assumed to begin.
+const SECOND_HALF_START = HALF_MIN + FH_STOPPAGE_MIN + HT_BREAK_MIN;
 
 // Build the on-screen live clock. Two sources, in priority order:
 //  1) the feed's own minute — trusted, but advanced by however long it's been
@@ -112,9 +115,9 @@ function liveDisplayTime(
   const elapsed = (Date.now() - new Date(kickoff).getTime()) / 60000;
   if (elapsed <= 0) return null;
   if (elapsed <= HALF_MIN) return `${Math.max(1, Math.ceil(elapsed))}'`;
-  if (elapsed <= HALF_MIN + 2) return "45'";                 // first-half stoppage
-  if (elapsed <= HALF_MIN + HT_BREAK_MIN) return "HT";       // ~15-min break
-  const played = HALF_MIN + (elapsed - HALF_MIN - HT_BREAK_MIN);
+  if (elapsed <= HALF_MIN + FH_STOPPAGE_MIN) return "45+'";   // first-half stoppage
+  if (elapsed <= SECOND_HALF_START) return "HT";              // ~15-min break
+  const played = HALF_MIN + (elapsed - SECOND_HALF_START);    // into the second half
   if (played >= 90) return "90+'";
   return `${Math.ceil(played)}'`;
 }
