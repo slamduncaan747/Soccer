@@ -83,7 +83,10 @@ function logRateLimitHeaders(headers: Headers, label: string) {
 }
 
 // Single fetch for ALL WC matches — one API call covers schedule, records, and live scores.
-// Free tier: 10 req/min. Caching at 60s means one burst per minute max.
+// Free tier: 10 req/min. We revalidate every 20s so live scores surface quickly
+// while still capping football-data at ≤3 calls/min (well under the limit).
+const FD_REVALIDATE_SECONDS = 20;
+
 export async function fetchAllWCMatches(): Promise<WCData | null> {
   const token = process.env.FOOTBALL_DATA_TOKEN;
   if (!token) {
@@ -94,7 +97,7 @@ export async function fetchAllWCMatches(): Promise<WCData | null> {
   try {
     const res = await fetch(`${FD_BASE}/competitions/WC/matches`, {
       headers: { "X-Auth-Token": token },
-      next: { revalidate: 60 }, // cache 60s server-side
+      next: { revalidate: FD_REVALIDATE_SECONDS }, // refresh live data ~every 20s
     });
 
     logRateLimitHeaders(res.headers, "fetchAllWCMatches");

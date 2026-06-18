@@ -289,6 +289,24 @@ body {
   font-size: 21px;
   margin: 0 3px;
 }
+.bug-odds { margin-top: 13px; }
+.bug-odds-tag {
+  font-family: 'Barlow Condensed', 'Archivo', sans-serif;
+  font-weight: 800;
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--dim);
+  margin-bottom: 6px;
+}
+.bug-odds .mc-odds-bar { height: 6px; }
+.bug-odds-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  font-size: 10px;
+}
 .bug-foot {
   margin-top: 10px;
   font-size: 11px;

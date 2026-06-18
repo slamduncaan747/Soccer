@@ -79,22 +79,44 @@ const isAlive = (erw: number) => erw >= 0.05;
 function isLiveByTime(kickoff: string | undefined): boolean {
   if (!kickoff) return false;
   const ms = Date.now() - new Date(kickoff).getTime();
-  return ms > 0 && ms < 120 * 60 * 1000;
+  return ms > 0 && ms < 130 * 60 * 1000;
 }
 
+const HALF_MIN = 45;     // minutes in a half
+const HT_BREAK_MIN = 15; // approximate halftime interval
+
+// Build the on-screen live clock. Two sources, in priority order:
+//  1) the feed's own minute — trusted, but advanced by however long it's been
+//     since `generatedAt` so the clock keeps ticking between refreshes instead
+//     of freezing on the last polled value;
+//  2) a kickoff-based estimate that models the halftime break, so the second
+//     half isn't ~15 minutes fast.
 function liveDisplayTime(
   apiMinute: number | undefined,
   status: string | undefined,
-  kickoff: string | undefined
+  kickoff: string | undefined,
+  generatedAt?: string
 ): string | null {
-  if (status === "HALFTIME") return "HT";
-  if (apiMinute != null && apiMinute > 0) return `${apiMinute}'`;
+  if (status === "HALFTIME" || status === "PAUSED") return "HT";
+
+  if (apiMinute != null && apiMinute > 0) {
+    const driftMin = generatedAt
+      ? Math.max(0, (Date.now() - new Date(generatedAt).getTime()) / 60000)
+      : 0;
+    const m = Math.floor(apiMinute + driftMin);
+    if (m >= 90) return "90+'";
+    return `${m}'`;
+  }
+
   if (!kickoff) return null;
-  const elapsed = Math.floor((Date.now() - new Date(kickoff).getTime()) / 60000);
+  const elapsed = (Date.now() - new Date(kickoff).getTime()) / 60000;
   if (elapsed <= 0) return null;
-  if (elapsed <= 52) return `${Math.min(elapsed, 45)}'`;
-  if (elapsed <= 65) return "HT";
-  return `${Math.min(elapsed - 15, 90)}'`;
+  if (elapsed <= HALF_MIN) return `${Math.max(1, Math.ceil(elapsed))}'`;
+  if (elapsed <= HALF_MIN + 2) return "45'";                 // first-half stoppage
+  if (elapsed <= HALF_MIN + HT_BREAK_MIN) return "HT";       // ~15-min break
+  const played = HALF_MIN + (elapsed - HALF_MIN - HT_BREAK_MIN);
+  if (played >= 90) return "90+'";
+  return `${Math.ceil(played)}'`;
 }
 
 /* ──────────────────────────────────────────────────────
@@ -111,6 +133,8 @@ export default function Page() {
   const touchStartY = useRef(-1);
   const pulling = useRef(false);
 
+  const [, forceTick] = useState(0);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -123,7 +147,39 @@ export default function Page() {
     }
   }, []);
 
+  // Silent background refresh — no spinner, keep last-good data on failure.
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch("/api/leaderboard?iterations=5000", { cache: "no-store" });
+      setData((await res.json()) as ProjectionResult);
+    } catch {
+      /* transient failure — keep showing the previous projection */
+    }
+  }, []);
+
   useEffect(() => { load(); }, [load]);
+
+  // Live clock tick: re-render every 15s so on-screen match minutes advance
+  // between data refreshes (the minute is derived from the current time).
+  useEffect(() => {
+    const id = setInterval(() => forceTick((n) => n + 1), 15_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Auto-refresh: poll the projection frequently while any match is live (or about
+  // to kick off) so scores aren't stale, and lazily otherwise to spare the
+  // rate-limited APIs.
+  useEffect(() => {
+    const active = (data?.fixtures ?? []).some((f) => {
+      if (f.liveStatus != null) return f.liveStatus !== "FINISHED";
+      if (isLiveByTime(f.kickoff)) return true;
+      if (!f.kickoff) return false;
+      const toKickoff = new Date(f.kickoff).getTime() - Date.now();
+      return toKickoff > 0 && toKickoff < 10 * 60 * 1000; // kicks off within 10 min
+    });
+    const id = setInterval(refresh, active ? 30_000 : 120_000);
+    return () => clearInterval(id);
+  }, [data, refresh]);
 
   const onTouchStart = useCallback((e: React.TouchEvent) => {
     if (document.documentElement.scrollTop === 0) {
@@ -199,7 +255,7 @@ export default function Page() {
           </div>
         ) : (
           <div className="tab-pane" key={tab}>
-            {tab === "games"      && <GamesTab     fixtures={data.fixtures} />}
+            {tab === "games"      && <GamesTab     fixtures={data.fixtures} generatedAt={data.generatedAt} />}
             {tab === "standings"  && <StandingsTab players={data.players} />}
             {tab === "odds"       && <OddsTab      players={data.players} iterations={data.iterations} oddsHistory={data.oddsHistory} />}
             {tab === "insights"   && <InsightsTab  players={data.players} fixtures={data.fixtures} playerFactors={data.playerFactors} />}
@@ -228,7 +284,7 @@ export default function Page() {
 /* ══════════════════════════════════════════════════════
    GAMES TAB
 ══════════════════════════════════════════════════════ */
-function GamesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
+function GamesTab({ fixtures, generatedAt }: { fixtures: FixtureProjection[]; generatedAt?: string }) {
   const groups = useMemo(() => groupByDay(fixtures), [fixtures]);
   const todayKey = groups.find((g) => g.isToday)?.key ?? groups[0]?.key ?? null;
   const [selectedKey, setSelectedKey] = useState<string | null>(todayKey);
@@ -268,7 +324,7 @@ function GamesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
 
       <div className="day-matches">
         {/* score bug */}
-        {liveBug && <ScoreBug fixture={liveBug} />}
+        {liveBug && <ScoreBug fixture={liveBug} generatedAt={generatedAt} />}
 
         {/* match rows */}
         {activeGroup.matches.length === 0 ? (
@@ -276,16 +332,23 @@ function GamesTab({ fixtures }: { fixtures: FixtureProjection[] }) {
         ) : (
           activeGroup.matches
             .filter((f) => f !== liveBug)
-            .map((f) => <MatchRow key={f.id} fixture={f} />)
+            .map((f) => <MatchRow key={f.id} fixture={f} generatedAt={generatedAt} />)
         )}
       </div>
     </div>
   );
 }
 
-function ScoreBug({ fixture: f }: { fixture: FixtureProjection }) {
-  const minuteStr = liveDisplayTime(f.liveMinute, f.liveStatus, f.kickoff);
+function ScoreBug({ fixture: f, generatedAt }: { fixture: FixtureProjection; generatedAt?: string }) {
+  const minuteStr = liveDisplayTime(f.liveMinute, f.liveStatus, f.kickoff, generatedAt);
   const score = f.liveScore ?? { home: 0, away: 0 };
+
+  const odds = f.oddsHome;
+  const hp = odds ? Math.round(odds.win * 100) : null;
+  const dp = odds ? Math.round(odds.draw * 100) : null;
+  const ap = odds ? Math.round(odds.loss * 100) : null;
+  const hasOdds = hp !== null && dp !== null && ap !== null;
+
   return (
     <div className="score-bug">
       <div className="bug-tag">
@@ -311,12 +374,30 @@ function ScoreBug({ fixture: f }: { fixture: FixtureProjection }) {
           <Flag team={f.away} height={26} />
         </div>
       </div>
+
+      {/* live win-probability bar from the current market */}
+      {hasOdds && (
+        <div className="bug-odds">
+          <div className="bug-odds-tag">LIVE WIN ODDS</div>
+          <div className="mc-odds-bar">
+            <span style={{ width: `${hp}%`, background: playerColor(f.homeOwner) }} />
+            <span className="ob-draw" style={{ width: `${dp}%` }} />
+            <span style={{ width: `${ap}%`, background: playerColor(f.awayOwner) }} />
+          </div>
+          <div className="bug-odds-labels">
+            <span style={{ color: playerColor(f.homeOwner) }}>{abbr(f.home)} {hp}%</span>
+            <span style={{ color: "var(--dim)" }}>Draw {dp}%</span>
+            <span style={{ color: playerColor(f.awayOwner) }}>{abbr(f.away)} {ap}%</span>
+          </div>
+        </div>
+      )}
+
       <div className="bug-foot">{f.home} vs {f.away}</div>
     </div>
   );
 }
 
-function MatchRow({ fixture: f }: { fixture: FixtureProjection }) {
+function MatchRow({ fixture: f, generatedAt }: { fixture: FixtureProjection; generatedAt?: string }) {
   const d = f.kickoff ? new Date(f.kickoff) : null;
   const timeStr = d
     ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
@@ -332,7 +413,7 @@ function MatchRow({ fixture: f }: { fixture: FixtureProjection }) {
   const live = !finished && (f.liveStatus != null
     ? f.liveStatus !== "FINISHED"
     : isLiveByTime(f.kickoff));
-  const minuteStr = live ? liveDisplayTime(f.liveMinute, f.liveStatus, f.kickoff) : null;
+  const minuteStr = live ? liveDisplayTime(f.liveMinute, f.liveStatus, f.kickoff, generatedAt) : null;
 
   return (
     <div className={`match-card${finished ? " done" : ""}`}>
