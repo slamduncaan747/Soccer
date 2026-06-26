@@ -33,9 +33,13 @@ This document describes the model **as implemented**. Code references:
 
 ### 2.1 Current results (state) — football-data.org
 A single call to `/competitions/WC/matches` returns every match with status and
-score. From **FINISHED** matches we accumulate each team's current **W / D / L**.
-Only **W** affects scoring, but D/L are tracked for display. These are *realized*
-results and enter the simulation as fixed starting points (not random).
+score. From **FINISHED GROUP-STAGE** matches we accumulate each team's current
+**W / D / L**. Knockout match results are deliberately **not** tallied here —
+they enter the model exclusively through the reach markets of §2.2(b) (a won
+knockout match shows up as `reach[next round] → 1`, worth 3 points), so counting
+them here as well would double-count. These group records are *realized* results
+and enter the simulation as fixed starting points (not random). Each player's
+**current points = 3 × (group wins) + 1 × (group draws)** across their 8 teams.
 
 ### 2.2 Forward-looking probabilities — Kalshi prediction markets
 All forward probabilities are **market-implied** from Kalshi (a regulated

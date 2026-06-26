@@ -74,11 +74,40 @@ export function mockGroupFixtures(records?: TeamSeed[]): GroupFixture[] {
 }
 
 // Build knockout reach probabilities consistent with a bracket: monotonically
-// decreasing across rounds, scaled by team strength.
-export function mockKnockoutOdds(): KnockoutOdds[] {
+// decreasing across rounds, scaled by team strength. This is fallback scaffolding
+// used only when the real Kalshi reach markets are unavailable.
+//
+// When current group records are supplied we fold in form so the fallback stays
+// sane mid-tournament: a team that has finished its group games with no points is
+// treated as eliminated (reach 0) rather than being handed strength-based survival
+// odds, and weaker group runs are damped. Without this, an eliminated team that
+// scored nothing would still project knockout points.
+export function mockKnockoutOdds(records?: TeamSeed[]): KnockoutOdds[] {
+  const recMap = records ? new Map(records.map((r) => [r.name, r])) : null;
+  // Infer the group format (games per team) from how many games the furthest-along
+  // team has played, so "finished the group" adapts to the real schedule.
+  const groupGames = recMap
+    ? Math.max(2, ...[...recMap.values()].map((r) => r.w + r.d + r.l))
+    : 0;
+
   return ALL_TEAMS.map((t) => {
     const s = strength(t.name);
-    const reachR32 = Math.min(0.97, 0.35 + s * 0.6); // most strong teams advance
+    const rec = recMap?.get(t.name);
+    const gp = rec ? rec.w + rec.d + rec.l : 0;
+    const pts = rec ? rec.w * 3 + rec.d : 0;
+
+    // A team that has played its full group slate with 0 points cannot advance.
+    if (rec && gp >= groupGames && pts === 0) {
+      const reach: Record<string, number> = {};
+      for (const stage of KNOCKOUT_STAGES) reach[stage] = 0;
+      return { team: t.name, reach };
+    }
+
+    // Form multiplier in [0.2, 1.15] from points-per-game so far (0 games → 1.0).
+    const ppg = gp > 0 ? pts / gp : 1; // 0..3
+    const form = gp > 0 ? Math.max(0.2, Math.min(1.15, 0.45 + ppg / 3)) : 1;
+
+    const reachR32 = Math.min(0.97, (0.35 + s * 0.6) * form); // most strong teams advance
     const decay = 0.45 + s * 0.4; // stronger teams keep winning
     const reach: Record<string, number> = {};
     let p = reachR32;

@@ -85,7 +85,7 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
     groupSource = "mock";
   }
 
-  const knockoutOdds = kalshiKOResult?.odds ?? mockKnockoutOdds();
+  const knockoutOdds = kalshiKOResult?.odds ?? mockKnockoutOdds(records);
   const knockoutSource: "kalshi" | "mock" = kalshiKOResult?.ok ? "kalshi" : "mock";
 
   // ── 4) Run Monte Carlo ────────────────────────────────────────

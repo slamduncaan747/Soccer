@@ -159,8 +159,11 @@ export async function fetchAllWCMatches(): Promise<WCData | null> {
         minute: m.minute,
       });
 
-      // W/D/L records from finished matches
-      if (m.status === "FINISHED") {
+      // W/D/L records from finished GROUP-STAGE matches only. Knockout results are
+      // counted through the Kalshi reach markets instead (a won knockout match
+      // shows up as reach[next round] → 1, worth 3 points in the projection), so
+      // tallying them here as well would double-count those points.
+      if (m.status === "FINISHED" && m.stage === "GROUP_STAGE") {
         const winner = m.score?.winner;
         if (winner === "HOME_TEAM") { bump(home, "w"); bump(away, "l"); }
         else if (winner === "AWAY_TEAM") { bump(away, "w"); bump(home, "l"); }
