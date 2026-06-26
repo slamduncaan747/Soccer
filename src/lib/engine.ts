@@ -62,6 +62,11 @@ interface TeamRuntime {
   condWin: number[];
   reachFirst: number; // P(reach the first knockout round, r32)
   expRemainingWins: number; // analytic, for display
+  // Consecutive knockout rounds from round 0 where condWin ≈ 1.0 — these matches
+  // are already finished and their wins are in currentWins from FD. The MC
+  // simulation re-simulates them (condWin=1.0 → always wins), so we subtract
+  // this count from the MC base to avoid counting those wins twice.
+  confirmedKOWins: number;
 }
 
 function buildTeamRuntime(input: EngineInput): TeamRuntime[] {
@@ -75,13 +80,22 @@ function buildTeamRuntime(input: EngineInput): TeamRuntime[] {
     const reachFirst = clamp01(reach[levels[0]] ?? 0);
     const condWin: number[] = [];
     let analyticWins = 0;
+    let confirmedKOWins = 0;
+    let checkingConfirmed = true;
     for (let i = 0; i < levels.length - 1; i++) {
       const here = clamp01(reach[levels[i]] ?? 0);
       const nextReach = clamp01(reach[levels[i + 1]] ?? 0);
-      // conditional prob of winning THIS match given alive at this level
-      condWin.push(here > 0 ? clamp01(nextReach / here) : 0);
-      // analytic expected wins contribution = P(reach next level) = nextReach
+      const cw = here > 0 ? clamp01(nextReach / here) : 0;
+      condWin.push(cw);
       analyticWins += nextReach;
+      // Detect consecutive rounds from 0 that are already complete: when
+      // reach[i] == reach[i+1] (cw == 1.0), the match has been played and
+      // won — already in currentWins. Count them to correct the MC base.
+      if (checkingConfirmed && cw >= 1 - 1e-9) {
+        confirmedKOWins++;
+      } else {
+        checkingConfirmed = false;
+      }
     }
     return {
       name: t.name,
@@ -91,6 +105,7 @@ function buildTeamRuntime(input: EngineInput): TeamRuntime[] {
       condWin,
       reachFirst,
       expRemainingWins: analyticWins,
+      confirmedKOWins,
     };
   });
 }
@@ -126,12 +141,14 @@ export function runProjection(input: EngineInput): ProjectionResult {
   const iterations = input.iterations ?? 50000;
   const rng = mulberry32(input.seed ?? 0xC0FFEE);
   const teams = buildTeamRuntime(input);
-  const teamByName = new Map(teams.map((t) => [t.name, t]));
 
   // ---- Analytic expected final points (closed form, exact in expectation) ----
   const teamProjections: TeamProjection[] = teams.map((t) => {
     const grpWins = groupExpectedWins(t.name, input.groupFixtures);
-    const expRemaining = grpWins + t.expRemainingWins; // expected remaining WINS
+    // expRemainingWins sums reach[i+1] for all knockout rounds, which includes rounds
+    // already completed (reach ≈ 1.0). Those wins are already in currentWins from FD,
+    // so subtract confirmedKOWins to count each completed round exactly once.
+    const expRemaining = grpWins + (t.expRemainingWins - t.confirmedKOWins);
     const grpDrawPoints = groupExpectedDrawPoints(t.name, input.groupFixtures);
     const currentPoints = pointsFor(t.currentWins, t.currentDraws, 0);
     const rec = input.records.find((r) => r.name === t.name);
@@ -162,8 +179,17 @@ export function runProjection(input: EngineInput): ProjectionResult {
     arr.push(t);
     ownerTeams.set(t.owner, arr);
   }
-  const basePoints = players.map((p) =>
+  // Display current points: all wins so far (group + completed KO).
+  const currentPoints = players.map((p) =>
     (ownerTeams.get(p) || []).reduce((s, t) => s + pointsFor(t.currentWins, t.currentDraws, 0), 0)
+  );
+  // MC base: exclude confirmed KO wins that the simulation will re-add via condWin=1.0,
+  // preventing them from being counted twice (once in currentWins, once in simulation).
+  const basePoints = players.map((p) =>
+    (ownerTeams.get(p) || []).reduce(
+      (s, t) => s + pointsFor(Math.max(0, t.currentWins - t.confirmedKOWins), t.currentDraws, 0),
+      0
+    )
   );
 
   // ---- Fixture-leverage bookkeeping ----------------------------------------
@@ -421,7 +447,7 @@ export function runProjection(input: EngineInput): ProjectionResult {
     const myTeams = teamProjections.filter((t) => t.owner === p);
     return {
       player: p,
-      currentPoints: basePoints[i],
+      currentPoints: currentPoints[i],
       expectedFinalPoints: round2(expFinalAccum[i] / iterations),
       pFirst: round4(pFirst),
       pTop3: round4(pTop3),

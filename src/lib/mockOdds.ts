@@ -1,4 +1,4 @@
-import { ALL_TEAMS } from "../data/pool";
+import { ALL_TEAMS, TeamSeed } from "../data/pool";
 import { GroupFixture, KnockoutOdds, KNOCKOUT_STAGES } from "./types";
 import { mulberry32, normalize3 } from "./probability";
 
@@ -24,18 +24,27 @@ function strength(team: string): number {
 }
 
 // Build a plausible set of remaining group fixtures by pairing pool teams.
-export function mockGroupFixtures(): GroupFixture[] {
+// Pass current records so teams that have already played their group matches are
+// excluded from rounds they no longer have remaining (each team plays 2 group
+// games; a team with w+d+l=1 needs 1 more, w+d+l=2 needs none).
+export function mockGroupFixtures(records?: TeamSeed[]): GroupFixture[] {
   const rng = mulberry32(42);
-  const teams = ALL_TEAMS.map((t) => t.name);
+  const allTeams = ALL_TEAMS.map((t) => t.name);
+  // Map team name → number of remaining group matches (max 2, min 0).
+  const played = records
+    ? new Map(records.map((r) => [r.name, r.w + r.d + r.l]))
+    : null;
   const fixtures: GroupFixture[] = [];
   // Stagger kickoffs starting at noon today so the "Today" view has live-looking
   // matches and the rest spill across the coming days (mock scaffolding only).
   const start = new Date();
   start.setHours(12, 0, 0, 0);
   let slot = 0;
-  // Two remaining group matches per team, paired round-robin-ish.
+  // Up to two remaining group matches per team; exclude teams that have already
+  // played their quota for a given round index (0 = first remaining, 1 = second).
   for (let round = 0; round < 2; round++) {
-    const shuffled = [...teams].sort(() => rng() - 0.5);
+    const eligible = allTeams.filter((t) => (played?.get(t) ?? 0) + round < 2);
+    const shuffled = [...eligible].sort(() => rng() - 0.5);
     for (let i = 0; i + 1 < shuffled.length; i += 2) {
       const home = shuffled[i];
       const away = shuffled[i + 1];

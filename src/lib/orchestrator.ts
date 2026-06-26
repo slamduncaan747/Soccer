@@ -81,7 +81,7 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
     groupFixtures = kalshiGroup;
     groupSource = "kalshi";
   } else {
-    groupFixtures = mockGroupFixtures();
+    groupFixtures = mockGroupFixtures(records);
     groupSource = "mock";
   }
 

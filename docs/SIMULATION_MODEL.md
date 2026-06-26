@@ -210,10 +210,11 @@ These are the points most worth a statistician's scrutiny.
   are cached up to 60s and served stale on rate-limit (does not affect
   statistical properties, only freshness).
 
-- **L6 — Scoring-rule note.** The pool scores **wins only** (3/0/0). The original
-  seed sheet appears to credit draws; standings are computed strictly from the
-  rule in `scoring.ts`, so seed totals will not reproduce. Changing the rule is a
-  one-line change there.
+- **L6 — Scoring-rule note.** The pool scores **3 points per win, 1 per draw,
+  0 per loss** (matches `POINTS` in `scoring.ts`). Draws arise only in the group
+  stage; both teams' owners receive the draw point. Seed totals in `pool.ts` may
+  not reproduce exactly if they were recorded from a snapshot taken before draw
+  scoring was added — use the live FD records in production.
 
 ---
 

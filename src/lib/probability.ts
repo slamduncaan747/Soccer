@@ -13,17 +13,6 @@ export function normalize3(raw: ThreeWay): ThreeWay {
   return { win: raw.win / s, draw: raw.draw / s, loss: raw.loss / s };
 }
 
-export function normalizeMany(raw: number[]): number[] {
-  const s = raw.reduce((a, b) => a + b, 0);
-  if (s <= 0) return raw.map(() => 1 / raw.length);
-  return raw.map((x) => x / s);
-}
-
-// Convert a Kalshi YES price (cents, 0..100) to a probability (0..1).
-export function priceToProb(yesCents: number): number {
-  return Math.max(0, Math.min(1, yesCents / 100));
-}
-
 // Mulberry32 — small, fast, seedable PRNG so simulations are reproducible.
 export function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
