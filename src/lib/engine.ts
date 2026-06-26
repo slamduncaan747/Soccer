@@ -58,41 +58,47 @@ interface TeamRuntime {
   owner: string;
   currentWins: number;   // finished GROUP-STAGE wins (from FD)
   currentDraws: number;  // finished GROUP-STAGE draws (from FD)
+  koWins: number;        // knockout matches already WON (locked-in, 3 pts each)
   // sequential conditional win prob per knockout match (index aligned to KNOCKOUT_STAGES)
   condWin: number[];
-  reachFirst: number;       // P(reach the first knockout round, r32)
-  expKnockoutWins: number;  // expected knockout MATCHES won = Σ reach[i+1]
+  reachFirst: number;          // P(reach the first knockout round, r32)
+  expFutureKnockoutWins: number; // expected REMAINING knockout matches won
 }
 
 function buildTeamRuntime(input: EngineInput): TeamRuntime[] {
   const koMap = new Map(input.knockoutOdds.map((k) => [k.team, k.reach]));
+  const levels = KNOCKOUT_STAGES; // [r32, r16, qf, sf, final, champion]
   return input.records.map((t) => {
-    const reach = koMap.get(t.name) || {};
-    // KNOCKOUT_STAGES are six cumulative reach levels (r32 … champion) spanning
-    // the five knockout matches. A team "wins" the match between level i and i+1
-    // with conditional probability reach[i+1] / reach[i]. Expected knockout wins
-    // telescopes to Σ reach[i+1] = reach[r16] + reach[qf] + reach[sf] +
-    // reach[final] + champion. Knockout points come ENTIRELY from these markets
-    // (group results live in currentWins/currentDraws), so there is nothing to
-    // de-duplicate.
-    const levels = KNOCKOUT_STAGES;
+    // Realized knockout wins are locked in (counted in current points). A team
+    // that has won `koWins` knockout matches has provably reached level
+    // (1 + koWins) in the ladder, so we FLOOR those reach levels to 1 — this keeps
+    // the projection correct even if a settled market stops being quoted (which
+    // would otherwise read as reach 0 and erase a win the team actually earned).
+    const koWins = Math.max(0, Math.min(levels.length - 1, t.koWins ?? 0));
+    const reach: Partial<Record<Stage, number>> = { ...(koMap.get(t.name) || {}) };
+    for (let i = 0; i <= koWins; i++) reach[levels[i]] = 1; // r32 + each won round
+
+    // A team "wins" the match between level i and i+1 with conditional probability
+    // reach[i+1] / reach[i]. Expected knockout wins telescopes to Σ reach[i+1];
+    // subtracting the koWins already banked leaves the expected REMAINING wins.
     const reachFirst = clamp01(reach[levels[0]] ?? 0);
     const condWin: number[] = [];
-    let expKnockoutWins = 0;
+    let sumNextReach = 0;
     for (let i = 0; i < levels.length - 1; i++) {
       const here = clamp01(reach[levels[i]] ?? 0);
       const nextReach = clamp01(reach[levels[i + 1]] ?? 0);
       condWin.push(here > 0 ? clamp01(nextReach / here) : 0);
-      expKnockoutWins += nextReach;
+      sumNextReach += nextReach;
     }
     return {
       name: t.name,
       owner: TEAM_OWNER[t.name] ?? "—",
       currentWins: t.w,
       currentDraws: t.d,
+      koWins,
       condWin,
       reachFirst,
-      expKnockoutWins,
+      expFutureKnockoutWins: Math.max(0, sumNextReach - koWins),
     };
   });
 }
@@ -130,15 +136,15 @@ export function runProjection(input: EngineInput): ProjectionResult {
   const teams = buildTeamRuntime(input);
 
   // ---- Analytic expected final points (closed form, exact in expectation) ----
-  // expectedFinalPoints =
-  //     current group points (3·W + 1·D)
-  //   + expected remaining GROUP points  (Σ 3·P(win) + 1·P(draw) over remaining games)
-  //   + expected KNOCKOUT points         (3 · expected knockout matches won)
+  // currentPoints        = 3·(group wins) + 1·(group draws) + 3·(knockout wins so far)
+  // expectedFinalPoints  = currentPoints
+  //                      + expected remaining GROUP points (Σ 3·P(win) + 1·P(draw))
+  //                      + 3 · expected REMAINING knockout matches won
   const teamProjections: TeamProjection[] = teams.map((t) => {
     const grpWins = groupExpectedWins(t.name, input.groupFixtures);   // E[remaining group wins]
     const grpDrawPoints = groupExpectedDrawPoints(t.name, input.groupFixtures);
-    const expRemainingWins = grpWins + t.expKnockoutWins;             // wins still to come
-    const currentPoints = pointsFor(t.currentWins, t.currentDraws, 0);
+    const expRemainingWins = grpWins + t.expFutureKnockoutWins;       // wins still to come
+    const currentPoints = pointsFor(t.currentWins, t.currentDraws, 0) + t.koWins * POINTS.win;
     const rec = input.records.find((r) => r.name === t.name);
     return {
       team: t.name,
@@ -151,7 +157,7 @@ export function runProjection(input: EngineInput): ProjectionResult {
       // Knockout matches have no draws (advancement = a win), so draw points come
       // only from remaining group fixtures.
       expectedFinalPoints: round2(
-        currentPoints + grpWins * POINTS.win + grpDrawPoints + t.expKnockoutWins * POINTS.win
+        currentPoints + grpWins * POINTS.win + grpDrawPoints + t.expFutureKnockoutWins * POINTS.win
       ),
     };
   });
@@ -169,12 +175,16 @@ export function runProjection(input: EngineInput): ProjectionResult {
     arr.push(t);
     ownerTeams.set(t.owner, arr);
   }
-  // Current points = locked-in group-stage points (3·W + 1·D). This is also the
-  // Monte-Carlo starting score for each player; the simulation then adds remaining
-  // group-stage and knockout wins on top. Knockout points are NOT in this base —
-  // they come exclusively from the per-team reach simulation below.
+  // Current points = everything locked in: group points (3·W + 1·D) plus 3 per
+  // knockout match already won. This is also each player's Monte-Carlo starting
+  // score; the simulation then adds only the REMAINING group and knockout wins on
+  // top (already-won knockout rounds are skipped in the sim — see below — so they
+  // are never counted twice).
   const basePoints = players.map((p) =>
-    (ownerTeams.get(p) || []).reduce((s, t) => s + pointsFor(t.currentWins, t.currentDraws, 0), 0)
+    (ownerTeams.get(p) || []).reduce(
+      (s, t) => s + pointsFor(t.currentWins, t.currentDraws, 0) + t.koWins * POINTS.win,
+      0
+    )
   );
 
   // ---- Fixture-leverage bookkeeping ----------------------------------------
@@ -227,12 +237,14 @@ export function runProjection(input: EngineInput): ProjectionResult {
     }
 
     // 2) Knockout — sequential survival per team. Track deepest level reached:
-    //    level 1 = R32, then +1 per match won, up to 6 = champion.
+    //    level 1 = R32, then +1 per match won, up to 6 = champion. Rounds the
+    //    team has ALREADY won (koWins) are locked into the base score, so the sim
+    //    starts past them (level 1 + koWins) and only draws the remaining matches.
     for (let ti = 0; ti < T; ti++) {
       const t = teams[ti];
       if (rng() >= t.reachFirst) { teamLevel[ti] = 0; continue; } // missed R32
-      let level = 1; // reached R32
-      for (let s = 0; s < t.condWin.length; s++) {
+      let level = 1 + t.koWins; // reached R32, plus each knockout round already won
+      for (let s = t.koWins; s < t.condWin.length; s++) {
         if (rng() < t.condWin[s]) {
           addWinByOwner(pts, playerIndex, t.owner);
           level++;

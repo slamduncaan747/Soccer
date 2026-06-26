@@ -6,9 +6,14 @@ export interface TeamSeed {
   name: string;       // canonical display name
   fdName?: string;    // football-data.org name override when it differs
   kalshiName?: string; // Kalshi market label override when it differs
-  w: number;
-  d: number;
-  l: number;
+  w: number;          // GROUP-stage wins
+  d: number;          // GROUP-stage draws
+  l: number;          // GROUP-stage losses
+  // Realized KNOCKOUT matches won so far (R32 → Final). Each is a locked-in
+  // win worth 3 points. Tracked separately from group W/D/L because knockout
+  // results feed current points directly while remaining knockout rounds are
+  // still projected from the reach markets.
+  koWins?: number;
 }
 
 export interface PlayerSeed {

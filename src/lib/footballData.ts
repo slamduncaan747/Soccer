@@ -4,10 +4,18 @@ const FD_BASE = "https://api.football-data.org/v4";
 
 export interface LiveRecord {
   team: string;
-  w: number;
-  d: number;
-  l: number;
+  w: number;       // group-stage wins
+  d: number;       // group-stage draws
+  l: number;       // group-stage losses
+  koWins: number;  // knockout matches won (R32 → Final), each worth 3 points
 }
+
+// FD stage labels for the five scoring knockout rounds. A win in any of these
+// advances the team a round and is worth 3 points. THIRD_PLACE is intentionally
+// excluded — it advances no one and has no reach market.
+const KO_STAGES = new Set([
+  "LAST_32", "LAST_16", "QUARTER_FINALS", "SEMI_FINALS", "FINAL",
+]);
 
 export interface ScheduledMatch {
   id: number;
@@ -123,8 +131,8 @@ export async function fetchAllWCMatches(): Promise<WCData | null> {
     const recordMap = new Map<string, LiveRecord>();
     const liveScores: LiveMatchScore[] = [];
 
-    const bump = (team: string, k: "w" | "d" | "l") => {
-      const r = recordMap.get(team) ?? { team, w: 0, d: 0, l: 0 };
+    const bump = (team: string, k: "w" | "d" | "l" | "koWins") => {
+      const r = recordMap.get(team) ?? { team, w: 0, d: 0, l: 0, koWins: 0 };
       r[k]++;
       recordMap.set(team, r);
     };
@@ -159,15 +167,22 @@ export async function fetchAllWCMatches(): Promise<WCData | null> {
         minute: m.minute,
       });
 
-      // W/D/L records from finished GROUP-STAGE matches only. Knockout results are
-      // counted through the Kalshi reach markets instead (a won knockout match
-      // shows up as reach[next round] → 1, worth 3 points in the projection), so
-      // tallying them here as well would double-count those points.
-      if (m.status === "FINISHED" && m.stage === "GROUP_STAGE") {
+      // Realized results from finished matches. Group-stage results feed W/D/L;
+      // knockout results feed koWins (each win = advancing a round = 3 points).
+      // Keeping them separate lets current points reflect every win immediately
+      // while remaining knockout rounds are still projected from the reach
+      // markets — and avoids double-counting a knockout win in both places.
+      if (m.status === "FINISHED") {
         const winner = m.score?.winner;
-        if (winner === "HOME_TEAM") { bump(home, "w"); bump(away, "l"); }
-        else if (winner === "AWAY_TEAM") { bump(away, "w"); bump(home, "l"); }
-        else if (winner === "DRAW") { bump(home, "d"); bump(away, "d"); }
+        if (m.stage === "GROUP_STAGE") {
+          if (winner === "HOME_TEAM") { bump(home, "w"); bump(away, "l"); }
+          else if (winner === "AWAY_TEAM") { bump(away, "w"); bump(home, "l"); }
+          else if (winner === "DRAW") { bump(home, "d"); bump(away, "d"); }
+        } else if (KO_STAGES.has(m.stage)) {
+          // Knockout ties are decided by ET/penalties, so FD still reports a winner.
+          if (winner === "HOME_TEAM") bump(home, "koWins");
+          else if (winner === "AWAY_TEAM") bump(away, "koWins");
+        }
       }
 
       // Live scores from in-progress matches
@@ -200,7 +215,7 @@ export function mergeRecords(seed: TeamSeed[], live: LiveRecord[] | null): TeamS
   const liveMap = new Map(live.map((r) => [r.team, r]));
   return seed.map((t) => {
     const l = liveMap.get(t.name);
-    return l ? { ...t, w: l.w, d: l.d, l: l.l } : t;
+    return l ? { ...t, w: l.w, d: l.d, l: l.l, koWins: l.koWins } : t;
   });
 }
 

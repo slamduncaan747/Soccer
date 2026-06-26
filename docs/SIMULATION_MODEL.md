@@ -33,13 +33,24 @@ This document describes the model **as implemented**. Code references:
 
 ### 2.1 Current results (state) — football-data.org
 A single call to `/competitions/WC/matches` returns every match with status and
-score. From **FINISHED GROUP-STAGE** matches we accumulate each team's current
-**W / D / L**. Knockout match results are deliberately **not** tallied here —
-they enter the model exclusively through the reach markets of §2.2(b) (a won
-knockout match shows up as `reach[next round] → 1`, worth 3 points), so counting
-them here as well would double-count. These group records are *realized* results
-and enter the simulation as fixed starting points (not random). Each player's
-**current points = 3 × (group wins) + 1 × (group draws)** across their 8 teams.
+score. From **FINISHED** matches we accumulate two separate realized tallies per
+team:
+
+- **Group stage → W / D / L.** Group results give the group points (3·W + 1·D).
+- **Knockout (R32 … Final) → `koWins`.** Each knockout match won advances a round
+  and is worth 3 points, counted into current points **immediately**.
+
+Both are *realized* and enter the simulation as fixed starting points (not
+random). A team's **current points = 3 × (group wins) + 1 × (group draws) +
+3 × (knockout wins so far)**, and a player's current points is the sum over their
+8 teams — so every win, group or knockout, shows up live.
+
+Realized knockout wins also **floor** that team's reach ladder (§4): a team that
+has won `k` knockout matches has provably reached level `1 + k`, so those reach
+levels are pinned to 1 regardless of whether the (now-settled) market is still
+quoted. This prevents a banked win from being erased if Kalshi stops returning a
+resolved market. The projection then adds only the **remaining** group and
+knockout rounds on top of current points, so no win is ever double-counted.
 
 ### 2.2 Forward-looking probabilities — Kalshi prediction markets
 All forward probabilities are **market-implied** from Kalshi (a regulated
