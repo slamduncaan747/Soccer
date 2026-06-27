@@ -95,11 +95,19 @@ function logRateLimitHeaders(headers: Headers, label: string) {
 // while still capping football-data at ≤3 calls/min (well under the limit).
 const FD_REVALIDATE_SECONDS = 20;
 
-export async function fetchAllWCMatches(): Promise<WCData | null> {
+// Result wrapper so callers can tell a genuine outage (ok:false) from an empty
+// payload, and surface a human-readable reason on the error screen.
+export interface FDResult {
+  data: WCData | null;
+  ok: boolean;
+  detail: string;
+}
+
+export async function fetchAllWCMatches(): Promise<FDResult> {
   const token = process.env.FOOTBALL_DATA_TOKEN;
   if (!token) {
     console.warn("[footballData] FOOTBALL_DATA_TOKEN not set — skipping live data");
-    return null;
+    return { data: null, ok: false, detail: "FOOTBALL_DATA_TOKEN not set" };
   }
 
   try {
@@ -113,17 +121,17 @@ export async function fetchAllWCMatches(): Promise<WCData | null> {
     if (res.status === 429) {
       const reset = res.headers.get("X-RequestCounter-Reset");
       console.error(`[footballData] Rate limited — resets in ${reset ?? "?"}s`);
-      return null;
+      return { data: null, ok: false, detail: `HTTP 429 rate limited (resets in ${reset ?? "?"}s)` };
     }
     if (!res.ok) {
       console.error(`[footballData] HTTP ${res.status} ${res.statusText}`);
-      return null;
+      return { data: null, ok: false, detail: `HTTP ${res.status} ${res.statusText}` };
     }
 
     const data = (await res.json()) as { matches?: FDMatchFull[] };
     if (!data.matches?.length) {
       console.warn("[footballData] Response OK but no matches in payload");
-      return null;
+      return { data: null, ok: false, detail: "HTTP 200 but no matches in payload" };
     }
 
     const aliases = fdAliases();
@@ -203,10 +211,14 @@ export async function fetchAllWCMatches(): Promise<WCData | null> {
       `${recordMap.size} teams with results, ${liveScores.length} live`
     );
 
-    return { schedule, records: [...recordMap.values()], liveScores };
+    return {
+      data: { schedule, records: [...recordMap.values()], liveScores },
+      ok: true,
+      detail: `${schedule.length} matches, ${recordMap.size} teams with results, ${liveScores.length} live`,
+    };
   } catch (e) {
     console.error("[footballData] fetch threw:", e);
-    return null;
+    return { data: null, ok: false, detail: `fetch threw: ${String(e)}` };
   }
 }
 

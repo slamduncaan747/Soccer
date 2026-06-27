@@ -128,8 +128,11 @@ function liveDisplayTime(
 const PULL_TRIGGER = 64;
 const PULL_MAX = 80;
 
+interface LoadError { message: string; diagnostics: string[]; }
+
 export default function Page() {
   const [data, setData]   = useState<ProjectionResult | null>(null);
+  const [error, setError] = useState<LoadError | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab]     = useState<Tab>("games");
   const [pullDist, setPullDist] = useState(0);
@@ -138,27 +141,42 @@ export default function Page() {
 
   const [, forceTick] = useState(0);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // Fetch the projection. The API returns the projection ONLY when every live
+  // feed is healthy; otherwise it returns { error, diagnostics } and we show the
+  // error screen. We never display partial or fabricated numbers.
+  const fetchProjection = useCallback(async (): Promise<{ data?: ProjectionResult; error?: LoadError }> => {
     try {
       const res = await fetch("/api/leaderboard?iterations=5000", { cache: "no-store" });
-      setData((await res.json()) as ProjectionResult);
-    } catch {
-      setData(null);
-    } finally {
-      setLoading(false);
+      const json = await res.json();
+      if (!res.ok || json?.error) {
+        return {
+          error: {
+            message: typeof json?.error === "string" ? json.error : `Request failed (HTTP ${res.status})`,
+            diagnostics: Array.isArray(json?.diagnostics) ? json.diagnostics : [],
+          },
+        };
+      }
+      return { data: json as ProjectionResult };
+    } catch (e) {
+      return { error: { message: "Could not reach the projection service.", diagnostics: [String(e)] } };
     }
   }, []);
 
-  // Silent background refresh — no spinner, keep last-good data on failure.
+  const load = useCallback(async () => {
+    setLoading(true);
+    const r = await fetchProjection();
+    if (r.data) { setData(r.data); setError(null); }
+    else { setError(r.error!); setData(null); }
+    setLoading(false);
+  }, [fetchProjection]);
+
+  // Background refresh — no spinner. If a feed breaks, flip to the error screen
+  // (don't keep showing now-stale numbers); recover automatically when it's back.
   const refresh = useCallback(async () => {
-    try {
-      const res = await fetch("/api/leaderboard?iterations=5000", { cache: "no-store" });
-      setData((await res.json()) as ProjectionResult);
-    } catch {
-      /* transient failure — keep showing the previous projection */
-    }
-  }, []);
+    const r = await fetchProjection();
+    if (r.data) { setData(r.data); setError(null); }
+    else { setError(r.error!); setData(null); }
+  }, [fetchProjection]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -220,6 +238,10 @@ export default function Page() {
         }
       </div>
 
+      {error && !data ? (
+        <ErrorScreen error={error} onRetry={load} retrying={loading} />
+      ) : (
+        <>
       <header className="app-header">
         {tab === "games" || tab === "standings" ? (
           <div className="brand-bar">
@@ -280,6 +302,43 @@ export default function Page() {
           <InsightsIcon /> Insights
         </button>
       </nav>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════
+   ERROR SCREEN — shown whenever any live feed is unavailable.
+   No numbers are ever displayed in this state; the Advanced
+   toggle reveals per-feed diagnostics for debugging.
+══════════════════════════════════════════════════════ */
+function ErrorScreen({ error, onRetry, retrying }: { error: LoadError; onRetry: () => void; retrying: boolean }) {
+  const [showLogs, setShowLogs] = useState(false);
+  return (
+    <div className="err-screen">
+      <div className="err-card">
+        <div className="err-icon">⚠</div>
+        <h1 className="err-title">Live data unavailable</h1>
+        <p className="err-msg">{error.message}</p>
+        <p className="err-sub">
+          Projections are hidden until every live feed (results &amp; markets) is healthy —
+          no estimated numbers are shown.
+        </p>
+        <div className="err-actions">
+          <button className="err-retry" onClick={onRetry} disabled={retrying}>
+            {retrying ? "Retrying…" : "Retry"}
+          </button>
+          <button className="err-adv" onClick={() => setShowLogs((s) => !s)}>
+            {showLogs ? "Hide details" : "Advanced"}
+          </button>
+        </div>
+        {showLogs && (
+          <pre className="err-logs">
+            {error.diagnostics.length > 0 ? error.diagnostics.join("\n") : "No diagnostic detail available."}
+          </pre>
+        )}
+      </div>
     </div>
   );
 }

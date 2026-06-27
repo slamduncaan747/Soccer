@@ -1,18 +1,29 @@
 import { ALL_TEAMS, TEAM_OWNER } from "../data/pool";
 import { fetchAllWCMatches, mergeRecords, ScheduledMatch } from "./footballData";
 import { fetchGroupFixtures, fetchKnockoutOdds } from "./kalshi";
-import { mockGroupFixtures, mockKnockoutOdds } from "./mockOdds";
 import { runProjection } from "./engine";
 import { GroupFixture, ProjectionResult, FixtureProjection, ThreeWay } from "./types";
 import { snapshotOdds, readOddsHistory } from "./supabase";
 
 export interface ProjectOptions {
   iterations?: number;
-  forceMock?: boolean;
   // When set, attaches a full per-team breakdown for this team name to
   // result.debug.teamBreakdown — used to diagnose anomalous projections in
   // production (where the live FD/Kalshi inputs aren't otherwise visible).
   debugTeam?: string;
+}
+
+// Thrown when any live feed required to produce real numbers is unavailable.
+// The app NEVER falls back to fabricated/model odds — instead the API surfaces
+// this and the UI shows an error screen with the `diagnostics` log. `message`
+// is a short human reason; `diagnostics` is the per-feed detail.
+export class ProjectionFailure extends Error {
+  diagnostics: string[];
+  constructor(message: string, diagnostics: string[]) {
+    super(message);
+    this.name = "ProjectionFailure";
+    this.diagnostics = diagnostics;
+  }
 }
 
 // Last-known 3-way odds per fixture, keyed by team pairing in both orientations.
@@ -33,80 +44,78 @@ function recallOdds(home: string, away: string): ThreeWay | undefined {
 
 export async function buildProjection(opts: ProjectOptions = {}): Promise<ProjectionResult> {
   const iterations = opts.iterations ?? 50000;
-  const useMock = opts.forceMock ?? false;
 
-  // ── 1) Single football-data.org call for everything ───────────
-  const fdData = useMock ? null : await fetchAllWCMatches();
-  const records = mergeRecords(ALL_TEAMS, fdData?.records ?? null);
+  // ── 1) Fetch every live feed. No fallbacks: if any is unavailable we stop. ──
+  const [fd, grp, ko] = await Promise.all([
+    fetchAllWCMatches(),
+    fetchGroupFixtures(),
+    fetchKnockoutOdds(),
+  ]);
 
-  // ── 2) Kalshi odds ─────────────────────────────────────────────
-  let kalshiGroup: GroupFixture[] | null = null;
-  let kalshiKOResult: Awaited<ReturnType<typeof fetchKnockoutOdds>> | null = null;
+  const diagnostics: string[] = [
+    `[football-data] ${fd.ok ? "OK" : "FAIL"} — ${fd.detail}`,
+    `[kalshi group markets] ${grp.ok ? "OK" : "FAIL"} — ${grp.detail}`,
+    `[kalshi knockout markets] ${ko.ok ? "OK" : "FAIL"} — ${ko.detail}`,
+  ];
 
-  if (!useMock) {
-    const [grpResult, koResult] = await Promise.all([
-      fetchGroupFixtures(),
-      fetchKnockoutOdds(),
-    ]);
-    if (grpResult.ok) kalshiGroup = grpResult.fixtures;
-    if (koResult.ok) kalshiKOResult = koResult;
+  // Any broken feed → hard stop. We never display fabricated numbers.
+  const failures: string[] = [];
+  if (!fd.ok) failures.push("live results & schedule (football-data.org)");
+  if (!grp.ok) failures.push("group match markets (Kalshi)");
+  if (!ko.ok) failures.push("knockout reach markets (Kalshi)");
+  if (failures.length > 0) {
+    throw new ProjectionFailure(`Live data unavailable: ${failures.join("; ")}.`, diagnostics);
   }
 
-  // ── 3) Build group fixtures for simulation (unfinished only) ──
-  let groupFixtures: GroupFixture[];
-  let groupSource: "kalshi" | "mock" = "mock";
-  const fdSchedule = fdData?.schedule ?? null;
+  const fdData = fd.data!;
+  const fdSchedule = fdData.schedule;
+  const records = mergeRecords(ALL_TEAMS, fdData.records);
+  const knockoutOdds = ko.odds;
 
-  if (fdSchedule && fdSchedule.length > 0) {
-    const kalshiMap = new Map<string, GroupFixture>();
-    for (const f of kalshiGroup ?? []) {
-      kalshiMap.set(`${f.home}|${f.away}`, f);
-    }
+  // ── 2) Build remaining group fixtures from the live schedule + live odds. ──
+  const kalshiMap = new Map<string, GroupFixture>();
+  for (const f of grp.fixtures) kalshiMap.set(`${f.home}|${f.away}`, f);
 
-    groupFixtures = fdSchedule
-      .filter((m) => m.stage === "GROUP_STAGE")
-      .filter((m) => !["FINISHED", "CANCELLED", "POSTPONED"].includes(m.status))
-      .map((m) => {
-        const k = kalshiMap.get(`${m.home}|${m.away}`);
-        const kFlip = !k ? kalshiMap.get(`${m.away}|${m.home}`) : null;
-        let oddsHome = k?.oddsHome;
-        if (!oddsHome && kFlip?.oddsHome) {
-          oddsHome = { win: kFlip.oddsHome.loss, draw: kFlip.oddsHome.draw, loss: kFlip.oddsHome.win };
-        }
-        // Remember fresh odds; fall back to the last-known price once the market
-        // closes at kickoff so live fixtures keep their odds.
-        if (oddsHome) rememberOdds(m.home, m.away, oddsHome);
-        else oddsHome = recallOdds(m.home, m.away);
-        return { id: `fd-${m.id}`, home: m.home, away: m.away, kickoff: m.kickoff, oddsHome };
-      });
-
-    if (kalshiGroup && kalshiGroup.length > 0) groupSource = "kalshi";
-  } else if (kalshiGroup && kalshiGroup.length > 0) {
-    groupFixtures = kalshiGroup;
-    groupSource = "kalshi";
-  } else {
-    groupFixtures = mockGroupFixtures(records);
-    groupSource = "mock";
-  }
-
-  const knockoutOdds = kalshiKOResult?.odds ?? mockKnockoutOdds(records);
-  const knockoutSource: "kalshi" | "mock" = kalshiKOResult?.ok ? "kalshi" : "mock";
-
-  // ── 4) Run Monte Carlo ────────────────────────────────────────
-  const result = runProjection({ records, groupFixtures, knockoutOdds, iterations });
+  const groupFixtures: GroupFixture[] = fdSchedule
+    .filter((m) => m.stage === "GROUP_STAGE")
+    .filter((m) => !["FINISHED", "CANCELLED", "POSTPONED"].includes(m.status))
+    .map((m) => {
+      const k = kalshiMap.get(`${m.home}|${m.away}`);
+      const kFlip = !k ? kalshiMap.get(`${m.away}|${m.home}`) : null;
+      let oddsHome = k?.oddsHome;
+      if (!oddsHome && kFlip?.oddsHome) {
+        oddsHome = { win: kFlip.oddsHome.loss, draw: kFlip.oddsHome.draw, loss: kFlip.oddsHome.win };
+      }
+      // Remember fresh odds; fall back to the last-known price once the market
+      // closes at kickoff so live fixtures keep their (real) odds.
+      if (oddsHome) rememberOdds(m.home, m.away, oddsHome);
+      else oddsHome = recallOdds(m.home, m.away);
+      return { id: `fd-${m.id}`, home: m.home, away: m.away, kickoff: m.kickoff, oddsHome };
+    });
 
   const fixturesWithOdds = groupFixtures.filter((f) => f.oddsHome != null).length;
-  const oddsSource: ProjectionResult["oddsSource"] =
-    groupSource === "kalshi" && knockoutSource === "kalshi" ? "kalshi"
-    : groupSource === "kalshi" || knockoutSource === "kalshi" ? "mixed"
-    : "mock";
 
-  result.oddsSource = oddsSource;
+  // If there are upcoming group games but the market feed priced none of them,
+  // the group odds are effectively missing — stop rather than show partial numbers.
+  if (groupFixtures.length > 0 && fixturesWithOdds === 0) {
+    diagnostics.push(
+      `[group odds] ${groupFixtures.length} remaining group game(s) but 0 matched a Kalshi market`
+    );
+    throw new ProjectionFailure(
+      "Group match odds could not be matched to any upcoming game.",
+      diagnostics
+    );
+  }
+
+  // ── 3) Run Monte Carlo on real data only ──────────────────────
+  const result = runProjection({ records, groupFixtures, knockoutOdds, iterations });
+
+  result.oddsSource = "kalshi";
   result.status = {
     ...result.status,
-    liveResults: !!fdData?.records?.length,
-    groupSource,
-    knockoutSource,
+    liveResults: true,
+    groupSource: "kalshi",
+    knockoutSource: "kalshi",
     fixturesWithOdds,
     totalFixtures: groupFixtures.length,
     knockoutTeams: knockoutOdds.length,
@@ -166,7 +175,7 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
   // ── 6) Merge live scores into all fixture projections ──────────
   // Runs after every fixture is assembled so live games added above also
   // pick up their score/status/minute.
-  const liveScores = fdData?.liveScores ?? [];
+  const liveScores = fdData.liveScores;
   if (liveScores.length > 0) {
     const liveMap = new Map(liveScores.map((l) => [`${l.home}|${l.away}`, l]));
     result.fixtures = result.fixtures.map((f) => {
@@ -185,7 +194,9 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
   const matchday = records.reduce((max, t) => Math.max(max, t.w + t.d + t.l), 0);
 
   // ── 8) Snapshot odds to Supabase (fire-and-forget) ────────────
-  if (process.env.NEXT_PUBLIC_SUPABASE_URL && !useMock) {
+  // Supabase only powers the historical odds chart; if it is down the live
+  // projection is still fully real, so this is intentionally non-blocking.
+  if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
     snapshotOdds(result.players, matchday).catch((e) =>
       console.error("[orchestrator] snapshotOdds error:", e)
     );
@@ -193,7 +204,7 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
 
   // ── 9) Read odds history from Supabase ────────────────────────
   let oddsHistory: ProjectionResult["oddsHistory"] = {};
-  if (process.env.NEXT_PUBLIC_SUPABASE_URL && !useMock) {
+  if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
     oddsHistory = await readOddsHistory(result.players.map((p) => p.player));
   }
   result.oddsHistory = oddsHistory;
@@ -201,18 +212,17 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
   // ── 10) Debug info ────────────────────────────────────────────
   result.debug = {
     footballDataToken: !!process.env.FOOTBALL_DATA_TOKEN,
-    fdScheduleMatches: fdSchedule?.length ?? null,
-    fdFinishedTeams: fdData?.records?.length ?? null,
-    fdLiveMatches: fdData?.liveScores?.length ?? null,
-    kalshiGroupFixtures: kalshiGroup?.length ?? null,
-    kalshiKnockoutTeams: kalshiKOResult?.odds?.length ?? null,
+    fdScheduleMatches: fdSchedule.length,
+    fdFinishedTeams: fdData.records.length,
+    fdLiveMatches: fdData.liveScores.length,
+    kalshiGroupFixtures: grp.fixtures.length,
+    kalshiKnockoutTeams: ko.odds.length,
     groupFixturesTotal: groupFixtures.length,
     groupFixturesWithOdds: fixturesWithOdds,
-    groupSource,
-    knockoutSource,
     matchday,
+    diagnostics,
     // Always present so the deployed build/version can be probed.
-    buildMarker: "ko-chain-v2",
+    buildMarker: "live-only-v1",
   };
 
   // Opt-in per-team breakdown: exposes exactly what fed a team's projection
@@ -221,7 +231,7 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
   if (opts.debugTeam) {
     const name = opts.debugTeam;
     const rec = records.find((r) => r.name === name) ?? null;
-    const ko = knockoutOdds.find((k) => k.team === name) ?? null;
+    const koEntry = knockoutOdds.find((k) => k.team === name) ?? null;
     const remaining = groupFixtures
       .filter((f) => f.home === name || f.away === name)
       .map((f) => ({ home: f.home, away: f.away, oddsHome: f.oddsHome ?? null }));
@@ -231,9 +241,7 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
     result.debug.teamBreakdown = {
       team: name,
       record: rec,
-      reach: ko?.reach ?? null,
-      groupSource,
-      knockoutSource,
+      reach: koEntry?.reach ?? null,
       remainingGroupGames: remaining,
       projection: proj,
     };

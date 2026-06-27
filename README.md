@@ -8,19 +8,24 @@ probability of winning the pool.
 
 ```bash
 npm install
-cp .env.example .env.local   # add tokens (optional — runs on model odds without them)
+cp .env.example .env.local   # add FOOTBALL_DATA_TOKEN (required to run)
 npm run dev                  # http://localhost:3000
 ```
 
-The app runs immediately with **model odds** (deterministic, strength-based) so
-you can see everything working before real markets exist. Add live sources via env.
+The app shows numbers **only when every live feed is healthy** — football-data.org
+results & schedule, plus the Kalshi group and knockout markets. There is **no
+modeled/fallback odds path**: if any feed is unavailable the UI shows an error
+screen (with an *Advanced* button exposing per-feed diagnostics) and displays no
+projections at all. This guarantees the leaderboard is never driven by fabricated
+numbers.
 
 ## Environment
 
 | Var | Purpose |
 |-----|---------|
-| `FOOTBALL_DATA_TOKEN` | football-data.org free-tier key for live W/D/L results. Without it, the app uses the seed standings. |
-| `KALSHI_WC_SERIES` | Comma-separated Kalshi series tickers for the World Cup, once they exist. The Kalshi client is auth-free (public market data). |
+| `FOOTBALL_DATA_TOKEN` | football-data.org free-tier key for live W/D/L results & schedule. **Required** — without it the app shows the error screen. |
+| `KALSHI_WC_SERIES` | Comma-separated Kalshi series tickers for the World Cup. The Kalshi client is auth-free (public market data); these markets are **required** for the projection to render. |
+| `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Optional — only powers the historical odds chart. If absent the live projection still renders; only the history line is empty. |
 
 ## Scoring
 
@@ -61,9 +66,8 @@ src/
     probability.ts      de-vig, normalize, seeded PRNG
     kalshi.ts           public Kalshi market-data client + odds extraction
     footballData.ts     live results provider (+ seed merge)
-    mockOdds.ts         deterministic fallback odds
     engine.ts           Monte Carlo projection engine
-    orchestrator.ts     wires sources → engine, degrades gracefully
+    orchestrator.ts     wires sources → engine; errors out if any feed is down
   app/
     api/leaderboard/    GET projection JSON
     page.tsx            mobile leaderboard UI
@@ -78,8 +82,9 @@ src/
   regexes and `WC_SERIES_HINTS` there.
 - **football-data.org**: free tier covers the WC (`/competitions/WC/matches`) with
   a ~10 req/min limit; responses are cached server-side.
-- If neither is available the app uses model odds and seed records, so it never
-  breaks.
+- If any required feed is unavailable the projection is **not** rendered — the API
+  returns `503 { error, diagnostics }` and the UI shows the error screen. The app
+  never substitutes modeled or seed numbers for missing live data.
 
 ## Tuning the team-name mapping
 

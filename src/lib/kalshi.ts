@@ -87,36 +87,56 @@ interface MarketCacheEntry {
   markets: KalshiMarket[];
   ts: number;
 }
+// A series fetch result: `ok` means we have real market data to use (a fresh
+// fetch, or a still-valid cached payload). `ok:false` means the exchange could
+// not be reached and we have nothing real — the projection must not proceed.
+interface SeriesResult {
+  markets: KalshiMarket[];
+  ok: boolean;
+  detail: string;
+}
 const FRESH_MS = 60_000;
 const marketCache = new Map<string, MarketCacheEntry>();
-const inflight = new Map<string, Promise<KalshiMarket[]>>();
+const inflight = new Map<string, Promise<SeriesResult>>();
 
-async function fetchSeriesMarkets(series: string): Promise<KalshiMarket[]> {
+async function fetchSeriesMarkets(series: string): Promise<SeriesResult> {
   const cached = marketCache.get(series);
-  if (cached && Date.now() - cached.ts < FRESH_MS) return cached.markets;
+  if (cached && Date.now() - cached.ts < FRESH_MS) {
+    const age = Math.round((Date.now() - cached.ts) / 1000);
+    return { markets: cached.markets, ok: true, detail: `${series}: ${cached.markets.length} markets (cached ${age}s ago)` };
+  }
 
   // Collapse concurrent requests for the same series into one network call.
   const existing = inflight.get(series);
   if (existing) return existing;
 
-  const p = (async (): Promise<KalshiMarket[]> => {
+  const p = (async (): Promise<SeriesResult> => {
     try {
       const res = await fetch(
         `${KALSHI_BASE}/markets?series_ticker=${encodeURIComponent(series)}&limit=1000`,
         { headers: { Accept: "application/json" }, cache: "no-store" }
       );
       if (!res.ok) {
-        const fallback = cached ? " — serving last-good cache" : "";
-        console.warn(`[kalshi] ${series} → HTTP ${res.status}${fallback}`);
-        return cached?.markets ?? [];
+        // A transient error with a usable cache is still real data; a hard
+        // failure with no cache means we genuinely cannot read this market.
+        if (cached) {
+          console.warn(`[kalshi] ${series} → HTTP ${res.status} — serving last-good cache`);
+          return { markets: cached.markets, ok: true, detail: `${series}: HTTP ${res.status}, served last-good cache (${cached.markets.length} markets)` };
+        }
+        console.warn(`[kalshi] ${series} → HTTP ${res.status} (no cache)`);
+        return { markets: [], ok: false, detail: `${series}: HTTP ${res.status}, no cached data` };
       }
       const data = (await res.json()) as { markets?: KalshiMarket[] };
       const markets = data.markets ?? [];
       if (markets.length) marketCache.set(series, { markets, ts: Date.now() });
-      return markets;
+      return { markets, ok: true, detail: `${series}: ${markets.length} markets` };
     } catch (e) {
-      console.warn(`[kalshi] ${series} fetch failed${cached ? " — serving last-good cache" : ""}:`, e);
-      return cached?.markets ?? [];
+      if (cached) {
+        console.warn(`[kalshi] ${series} fetch failed — serving last-good cache:`, e);
+        return { markets: cached.markets, ok: true, detail: `${series}: fetch error, served last-good cache (${cached.markets.length} markets)` };
+      }
+      console.warn(`[kalshi] ${series} fetch failed (no cache):`, e);
+      return { markets: [], ok: false, detail: `${series}: fetch error — ${String(e)}` };
     } finally {
       inflight.delete(series);
     }
@@ -153,7 +173,7 @@ function monotone(reach: Partial<Record<Stage, number>>): Partial<Record<Stage, 
 //   sf       ← KXWCROUND-*SEMI
 //   final    ← KXWCROUND-*FINAL (reach the final)
 //   champion ← KXMENWORLDCUP    (win the final / win the cup)
-export async function fetchKnockoutOdds(): Promise<{ odds: KnockoutOdds[]; ok: boolean }> {
+export async function fetchKnockoutOdds(): Promise<{ odds: KnockoutOdds[]; ok: boolean; detail: string }> {
   const aliases = teamAliases();
   const byTeam = new Map<string, Partial<Record<Stage, number>>>();
   const set = (team: string, stage: Stage, p: number) => {
@@ -162,11 +182,14 @@ export async function fetchKnockoutOdds(): Promise<{ odds: KnockoutOdds[]; ok: b
     byTeam.set(team, r);
   };
 
-  const [qual, round, champ] = await Promise.all([
+  const [qualRes, roundRes, champRes] = await Promise.all([
     fetchSeriesMarkets(SERIES.qualify),
     fetchSeriesMarkets(SERIES.round),
     fetchSeriesMarkets(SERIES.champion),
   ]);
+  const qual = qualRes.markets;
+  const round = roundRes.markets;
+  const champ = champRes.markets;
 
   for (const m of qual) {
     const team = matchTeam(m.yes_sub_title || m.subtitle, aliases);
@@ -203,9 +226,15 @@ export async function fetchKnockoutOdds(): Promise<{ odds: KnockoutOdds[]; ok: b
     reach: monotone(reach),
   }));
 
-  const ok = odds.some((o) => Object.keys(o.reach).length > 0);
+  // Healthy only if every underlying series fetch succeeded AND we actually
+  // parsed reach for at least one team. Anything less means the knockout feed
+  // is broken and the projection must not be shown.
+  const fetchOk = qualRes.ok && roundRes.ok && champRes.ok;
+  const hasReach = odds.some((o) => Object.keys(o.reach).length > 0);
+  const ok = fetchOk && hasReach;
+  const detail = `${qualRes.detail} | ${roundRes.detail} | ${champRes.detail} → ${odds.length} teams with reach`;
   console.log(`[kalshi] knockout: ${odds.length} teams with reach markets (ok=${ok})`);
-  return { odds, ok };
+  return { odds, ok, detail };
 }
 
 // Per-match 3-way group odds from the KXWCGAME series. Each game is one event
@@ -213,9 +242,10 @@ export async function fetchKnockoutOdds(): Promise<{ odds: KnockoutOdds[]; ok: b
 // We read each leg's YES probability and de-vig the trio into a coherent
 // {win, draw, loss} distribution. Home/away orientation is internal — the
 // orchestrator matches fixtures to the FD schedule in either orientation.
-export async function fetchGroupFixtures(): Promise<{ fixtures: GroupFixture[]; ok: boolean }> {
+export async function fetchGroupFixtures(): Promise<{ fixtures: GroupFixture[]; ok: boolean; detail: string }> {
   const aliases = teamAliases();
-  const markets = await fetchSeriesMarkets(SERIES.game);
+  const res = await fetchSeriesMarkets(SERIES.game);
+  const markets = res.markets;
 
   const byEvent = new Map<string, KalshiMarket[]>();
   for (const m of markets) {
@@ -251,7 +281,11 @@ export async function fetchGroupFixtures(): Promise<{ fixtures: GroupFixture[]; 
     });
   }
 
-  const ok = fixtures.length > 0;
-  console.log(`[kalshi] group: ${fixtures.length} fixtures with 3-way odds (ok=${ok})`);
-  return { fixtures, ok };
+  // Healthy as long as the series fetch itself succeeded. Zero parsed fixtures is
+  // valid late in the tournament (every group game has settled); whether the
+  // *remaining* games are actually priced is checked in the orchestrator against
+  // the live schedule.
+  const ok = res.ok;
+  console.log(`[kalshi] group: ${fixtures.length} fixtures with 3-way odds (fetch ok=${ok})`);
+  return { fixtures, ok, detail: `${res.detail} → ${fixtures.length} parsed fixtures` };
 }
