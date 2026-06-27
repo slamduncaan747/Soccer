@@ -5,4 +5,5 @@ node_modules/
 wc-pool/
 wc-pool.zip
 tsconfig.tsbuildinfo
+.validate-out/
 .claude/

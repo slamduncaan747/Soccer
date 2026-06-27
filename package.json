@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "validate:engine": "tsc scripts/validate-engine.ts --outDir .validate-out --module commonjs --target es2019 --esModuleInterop --skipLibCheck --moduleResolution node && node .validate-out/scripts/validate-engine.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.2",
