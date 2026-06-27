@@ -96,8 +96,14 @@ export function mockKnockoutOdds(records?: TeamSeed[]): KnockoutOdds[] {
     const gp = rec ? rec.w + rec.d + rec.l : 0;
     const pts = rec ? rec.w * 3 + rec.d : 0;
 
-    // A team that has played its full group slate with 0 points cannot advance.
-    if (rec && gp >= groupGames && pts === 0) {
+    // Treat a team as eliminated (reach 0) when it cannot realistically advance:
+    // either it has finished its group slate with no points, OR it is winless
+    // after 2+ games (0 points from two World Cup group games is, for fallback
+    // purposes, out — and this doesn't depend on the inferred group length, which
+    // can read high when other groups finish first). Without this a clearly-dead
+    // team would still be handed strength-based survival odds.
+    const eliminated = !!rec && pts === 0 && gp >= Math.min(2, groupGames);
+    if (eliminated) {
       const reach: Record<string, number> = {};
       for (const stage of KNOCKOUT_STAGES) reach[stage] = 0;
       return { team: t.name, reach };

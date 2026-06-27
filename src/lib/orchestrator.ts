@@ -9,6 +9,10 @@ import { snapshotOdds, readOddsHistory } from "./supabase";
 export interface ProjectOptions {
   iterations?: number;
   forceMock?: boolean;
+  // When set, attaches a full per-team breakdown for this team name to
+  // result.debug.teamBreakdown — used to diagnose anomalous projections in
+  // production (where the live FD/Kalshi inputs aren't otherwise visible).
+  debugTeam?: string;
 }
 
 // Last-known 3-way odds per fixture, keyed by team pairing in both orientations.
@@ -207,7 +211,33 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
     groupSource,
     knockoutSource,
     matchday,
+    // Always present so the deployed build/version can be probed.
+    buildMarker: "ko-chain-v2",
   };
+
+  // Opt-in per-team breakdown: exposes exactly what fed a team's projection
+  // (record incl. knockout wins, reach ladder, remaining priced group games)
+  // so an anomalous expected-points value can be traced on the live deployment.
+  if (opts.debugTeam) {
+    const name = opts.debugTeam;
+    const rec = records.find((r) => r.name === name) ?? null;
+    const ko = knockoutOdds.find((k) => k.team === name) ?? null;
+    const remaining = groupFixtures
+      .filter((f) => f.home === name || f.away === name)
+      .map((f) => ({ home: f.home, away: f.away, oddsHome: f.oddsHome ?? null }));
+    const proj = result.players
+      .flatMap((p) => p.teams)
+      .find((t) => t.team === name) ?? null;
+    result.debug.teamBreakdown = {
+      team: name,
+      record: rec,
+      reach: ko?.reach ?? null,
+      groupSource,
+      knockoutSource,
+      remainingGroupGames: remaining,
+      projection: proj,
+    };
+  }
 
   return result;
 }

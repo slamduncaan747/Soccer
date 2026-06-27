@@ -135,5 +135,28 @@ function check(name: string, cond: boolean, detail = "") {
   check("F: expected positive (reach not zeroed)", jp.expectedFinalPoints > 0, `exp=${jp.expectedFinalPoints}`);
 }
 
+// ── G: mock knockout fallback zeroes a winless 2-game team even when another ──
+//     group has already finished 3 games (groupGames inferred as 3). This guards
+//     the production path where Kalshi knockout markets are unavailable.
+{
+  const records = ALL_TEAMS.map((t) => ({ ...t, w: 1, d: 0, l: 1, koWins: 0 })); // most teams 2 games
+  records.find((r) => r.name === "Argentina")!.w = 3; // one team finished 3 → groupGames=3
+  records.find((r) => r.name === "Argentina")!.l = 0;
+  const panama = records.find((r) => r.name === "Panama")!;
+  panama.w = 0; panama.d = 0; panama.l = 2; // winless after 2 → eliminated
+
+  const knockoutOdds = mockKnockoutOdds(records); // mock fallback path
+  const panamaReach = knockoutOdds.find((k) => k.team === "Panama")!.reach;
+  console.log("\n=== G: mock fallback zeroes winless 2-game team (groupGames=3) ===");
+  const reachVals = Object.values(panamaReach);
+  check("G: Panama mock reach all zero", reachVals.every((v) => v === 0), `reach=${JSON.stringify(panamaReach)}`);
+
+  const groupFixtures: GroupFixture[] = mockGroupFixtures(records);
+  const r = runProjection({ records, groupFixtures, knockoutOdds, iterations: 20000 });
+  const pj = r.players.flatMap((p) => p.teams).find((t) => t.team === "Panama")!;
+  check("G: Panama expected ≈ current (no mock phantom)",
+    Math.abs(pj.expectedFinalPoints - pj.currentPoints) < 0.2, `cur=${pj.currentPoints} exp=${pj.expectedFinalPoints}`);
+}
+
 console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILED"}`);
 process.exit(failures === 0 ? 0 : 1);
