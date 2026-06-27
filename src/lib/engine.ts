@@ -76,20 +76,40 @@ function buildTeamRuntime(input: EngineInput): TeamRuntime[] {
     // would otherwise read as reach 0 and erase a win the team actually earned).
     const koWins = Math.max(0, Math.min(levels.length - 1, t.koWins ?? 0));
     const reach: Partial<Record<Stage, number>> = { ...(koMap.get(t.name) || {}) };
-    for (let i = 0; i <= koWins; i++) reach[levels[i]] = 1; // r32 + each won round
+    // Only floor reach for teams that have ACTUALLY won knockout matches: such a
+    // team provably reached R32 (qualified) plus each round it won, so pin
+    // levels r32 … (1 + koWins) to 1. A team with koWins === 0 has won nothing in
+    // the knockouts, so its reach is left entirely to the market — flooring r32
+    // here would wrongly hand every team (including eliminated ones) a guaranteed
+    // Round-of-32 berth.
+    if (koWins >= 1) {
+      for (let i = 0; i <= koWins; i++) reach[levels[i]] = 1; // r32 + each won round
+    }
 
     // A team "wins" the match between level i and i+1 with conditional probability
-    // reach[i+1] / reach[i]. Expected knockout wins telescopes to Σ reach[i+1];
-    // subtracting the koWins already banked leaves the expected REMAINING wins.
+    // reach[i+1] / reach[i].
     const reachFirst = clamp01(reach[levels[0]] ?? 0);
     const condWin: number[] = [];
-    let sumNextReach = 0;
     for (let i = 0; i < levels.length - 1; i++) {
       const here = clamp01(reach[levels[i]] ?? 0);
       const nextReach = clamp01(reach[levels[i + 1]] ?? 0);
       condWin.push(here > 0 ? clamp01(nextReach / here) : 0);
-      sumNextReach += nextReach;
     }
+
+    // Expected REMAINING knockout wins, computed from the SAME chain the Monte
+    // Carlo draws: P(reach level i+1) = reachFirst · ∏ condWin[0..i]. This must
+    // not be the raw Σ reach[i+1] — an incoherent ladder (e.g. an eliminated team
+    // whose entry market is gone but a stale downstream market is still quoted)
+    // would make the raw sum exceed what the simulation can ever produce, inflating
+    // a dead team's projected points. Walking the chain gates every downstream
+    // round behind reaching R32, so the analytic display and the sim always agree.
+    let alive = reachFirst;
+    let expFutureKnockoutWins = 0;
+    for (let i = 0; i < condWin.length; i++) {
+      alive = clamp01(alive * condWin[i]); // P(reach level i+1)
+      if (i >= koWins) expFutureKnockoutWins += alive; // only rounds not already won
+    }
+
     return {
       name: t.name,
       owner: TEAM_OWNER[t.name] ?? "—",
@@ -98,7 +118,7 @@ function buildTeamRuntime(input: EngineInput): TeamRuntime[] {
       koWins,
       condWin,
       reachFirst,
-      expFutureKnockoutWins: Math.max(0, sumNextReach - koWins),
+      expFutureKnockoutWins,
     };
   });
 }
