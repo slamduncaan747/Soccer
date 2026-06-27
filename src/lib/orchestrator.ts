@@ -266,18 +266,36 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
       }
     }
 
+    const round2 = (x: number) => Math.round(x * 100) / 100;
     const perTeam = ALL_TEAMS.map((t) => {
       const rec = records.find((r) => r.name === t.name);
       const proj = projByTeam.get(t.name);
+      const remaining = remByTeam.get(t.name) ?? [];
+      // Decompose expected points so the SOURCE of any elevation is unambiguous:
+      // expected remaining GROUP points vs expected KNOCKOUT points.
+      let grpWin = 0, grpDraw = 0;
+      for (const g of remaining) {
+        if (!g.oddsHome) continue;
+        if (g.home === t.name) { grpWin += g.oddsHome.win; grpDraw += g.oddsHome.draw; }
+        else { grpWin += g.oddsHome.loss; grpDraw += g.oddsHome.draw; }
+      }
+      const expGroupPoints = round2(grpWin * 3 + grpDraw * 1);
+      const cur = proj?.currentPoints ?? 0;
+      const exp = proj?.expectedFinalPoints ?? 0;
+      const expKnockoutPoints = round2(exp - cur - expGroupPoints); // residual = knockout
       return {
         team: t.name,
         owner: TEAM_OWNER[t.name] ?? "?",
         record: rec ? { w: rec.w, d: rec.d, l: rec.l, koWins: rec.koWins ?? 0 } : null,
         reach: reachByTeam.get(t.name) ?? null,
+        inKnockoutMarket: reachByTeam.has(t.name),
         currentPoints: proj?.currentPoints ?? null,
+        expGroupPoints,
+        expKnockoutPoints,
         expectedFinalPoints: proj?.expectedFinalPoints ?? null,
         expectedRemainingWins: proj?.expectedRemainingWins ?? null,
-        remainingGroupGames: remByTeam.get(t.name) ?? [],
+        nRemainingGames: remaining.length,
+        remainingGroupGames: remaining,
       };
     }).sort((a, b) => (b.expectedFinalPoints ?? 0) - (a.expectedFinalPoints ?? 0));
 

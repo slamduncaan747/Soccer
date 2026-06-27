@@ -45,15 +45,27 @@ function clamp01(x: number): number {
 
 // A market's YES probability: prefer the bid/ask midpoint (most current),
 // fall back to last trade, then the ask alone. Returns null if truly unpriced.
-function marketProb(m: KalshiMarket): number | null {
+//
+// CRITICAL: an illiquid / empty order book quotes the FULL range — bid≈0 and
+// ask≈1 (or both absent) — whose midpoint is a meaningless 0.5. That is exactly
+// what made every eliminated team show ~50% to reach each knockout round (and
+// therefore phantom expected points). We reject that quote: with no genuine
+// two-sided market there is no probability, so the team's reach is left unset
+// (→ 0 in the engine) rather than defaulting to a coin flip.
+export function marketProb(m: KalshiMarket): number | null {
   const bid = num(m.yes_bid_dollars);
   const ask = num(m.yes_ask_dollars);
   const last = num(m.last_price_dollars);
+
+  // Empty / one-sided book: no real bid AND no real ask (the 0–1 placeholder).
+  const emptyBook = (bid == null || bid <= 0.05) && (ask == null || ask >= 0.95);
+  if (emptyBook) return null;
+
   if (bid != null && ask != null && ask >= bid && bid + ask > 0) {
     return clamp01((bid + ask) / 2);
   }
-  if (last != null && last > 0) return clamp01(last);
-  if (ask != null && ask > 0) return clamp01(ask);
+  if (last != null && last > 0 && last < 1) return clamp01(last);
+  if (ask != null && ask > 0 && ask < 1) return clamp01(ask);
   return null;
 }
 
@@ -182,6 +194,20 @@ export interface KnockoutMarketRow {
   subtitle: string;
   team: string | null;
   prob: number | null;
+  // Raw fields so we can see WHY prob is what it is — e.g. a closed/settled
+  // market with no live quote whose `prob` came only from a stale last trade.
+  status?: string;
+  bid?: string | null;
+  ask?: string | null;
+  last?: string | null;
+}
+
+function koRow(m: KalshiMarket, stage: Stage | "?", team: string | null, prob: number | null): KnockoutMarketRow {
+  return {
+    ticker: m.ticker, eventTicker: m.event_ticker, stage,
+    subtitle: m.yes_sub_title || m.subtitle || "", team, prob,
+    status: m.status, bid: m.yes_bid_dollars, ask: m.yes_ask_dollars, last: m.last_price_dollars,
+  };
 }
 
 export async function fetchKnockoutOdds(
@@ -206,10 +232,9 @@ export async function fetchKnockoutOdds(
   const champ = champRes.markets;
 
   for (const m of qual) {
-    const sub = m.yes_sub_title || m.subtitle || "";
-    const team = matchTeam(sub, aliases);
+    const team = matchTeam(m.yes_sub_title || m.subtitle, aliases);
     const p = marketProb(m);
-    if (capture) rows.push({ ticker: m.ticker, eventTicker: m.event_ticker, stage: "r32", subtitle: sub, team, prob: p });
+    if (capture) rows.push(koRow(m, "r32", team, p));
     if (team && p != null) set(team, "r32", p);
   }
 
@@ -224,20 +249,18 @@ export async function fetchKnockoutOdds(
   for (const m of round) {
     const ev = m.event_ticker || "";
     const stage = roundStage.find(([re]) => re.test(ev))?.[1];
-    const sub = m.yes_sub_title || m.subtitle || "";
-    const team = matchTeam(sub, aliases);
+    const team = matchTeam(m.yes_sub_title || m.subtitle, aliases);
     const p = marketProb(m);
-    if (capture) rows.push({ ticker: m.ticker, eventTicker: ev, stage: stage ?? "?", subtitle: sub, team, prob: p });
+    if (capture) rows.push(koRow(m, stage ?? "?", team, p));
     if (!stage) continue;
     if (team && p != null) set(team, stage, p);
   }
 
   // Champion market = win the final → the terminal `champion` reach level.
   for (const m of champ) {
-    const sub = m.yes_sub_title || m.subtitle || "";
-    const team = matchTeam(sub, aliases);
+    const team = matchTeam(m.yes_sub_title || m.subtitle, aliases);
     const p = marketProb(m);
-    if (capture) rows.push({ ticker: m.ticker, eventTicker: m.event_ticker, stage: "champion", subtitle: sub, team, prob: p });
+    if (capture) rows.push(koRow(m, "champion", team, p));
     if (team && p != null) set(team, "champion", p);
   }
 

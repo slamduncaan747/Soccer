@@ -118,7 +118,7 @@ export default function DebugPage() {
               <table style={{ borderCollapse: "collapse", width: "100%" }}>
                 <thead>
                   <tr>
-                    {["team", "owner", "W-D-L-KO", "cur", "exp", "expRemW", "r32", "r16", "qf", "sf", "final", "champ", "remaining games"].map((h) => (
+                    {["team", "owner", "W-D-L-KO", "cur", "grpPts", "koPts", "exp", "inKO?", "r32", "r16", "qf", "sf", "final", "champ", "remaining games"].map((h) => (
                       <th key={h} style={th}>{h}</th>
                     ))}
                   </tr>
@@ -127,15 +127,20 @@ export default function DebugPage() {
                   {perTeam.map((t: any) => {
                     const r = t.reach ?? {};
                     const rec = t.record;
-                    const hot = (t.expectedFinalPoints ?? 0) > 2 && (rec ? rec.w * 3 + rec.d + (rec.koWins ?? 0) * 3 : 0) === 0;
+                    // The real bug signal: a winless team (0 current points) that is
+                    // nonetheless getting KNOCKOUT points. Group points for a team with
+                    // games left are legitimate; knockout points for a dead team are not.
+                    const koBug = (t.currentPoints ?? 0) === 0 && (t.expKnockoutPoints ?? 0) > 0.1;
                     return (
-                      <tr key={t.team} style={{ background: hot ? "rgba(255,82,71,.12)" : undefined }}>
+                      <tr key={t.team} style={{ background: koBug ? "rgba(255,82,71,.16)" : undefined }}>
                         <td style={td}><b>{t.team}</b></td>
                         <td style={{ ...td, color: "#8b929c" }}>{t.owner}</td>
                         <td style={td}>{rec ? `${rec.w}-${rec.d}-${rec.l}-${rec.koWins ?? 0}` : "—"}</td>
                         <td style={td}>{num(t.currentPoints)}</td>
+                        <td style={td}>{num(t.expGroupPoints)}</td>
+                        <td style={{ ...td, color: (t.expKnockoutPoints ?? 0) > 0.1 ? "#ffb040" : "#565d68", fontWeight: 700 }}>{num(t.expKnockoutPoints)}</td>
                         <td style={{ ...td, color: "#19cf7a", fontWeight: 700 }}>{num(t.expectedFinalPoints)}</td>
-                        <td style={td}>{num(t.expectedRemainingWins)}</td>
+                        <td style={{ ...td, color: t.inKnockoutMarket ? "#19cf7a" : "#565d68" }}>{t.inKnockoutMarket ? "yes" : "no"}</td>
                         <td style={td}>{pct(r.r32)}</td>
                         <td style={td}>{pct(r.r16)}</td>
                         <td style={td}>{pct(r.qf)}</td>
@@ -151,7 +156,10 @@ export default function DebugPage() {
                 </tbody>
               </table>
             </div>
-            <div style={{ marginTop: 6, color: "#565d68" }}>Rows highlighted red = 0 current points but &gt;2 expected (suspicious).</div>
+            <div style={{ marginTop: 6, color: "#565d68" }}>
+              <b>cur</b> = current points · <b>grpPts</b> = expected from remaining group games · <b>koPts</b> = expected from knockouts (residual) ·
+              <b> inKO?</b> = team present in Kalshi knockout markets. Red row = 0 current points but &gt;0 knockout points (the bug signal).
+            </div>
           </div>
 
           {/* raw knockout markets */}
@@ -160,22 +168,35 @@ export default function DebugPage() {
             <div style={{ overflowX: "auto", maxHeight: 360, overflowY: "auto" }}>
               <table style={{ borderCollapse: "collapse", width: "100%" }}>
                 <thead>
-                  <tr>{["stage", "subtitle", "→ matched team", "prob", "eventTicker"].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+                  <tr>{["stage", "subtitle", "→ matched team", "prob", "status", "bid", "ask", "last", "eventTicker"].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
                 </thead>
                 <tbody>
-                  {koMarkets.map((m: any, i: number) => (
-                    <tr key={i} style={{ background: m.team == null ? "rgba(255,176,64,.12)" : undefined }}>
-                      <td style={td}>{m.stage}</td>
-                      <td style={td}>{m.subtitle}</td>
-                      <td style={{ ...td, color: m.team ? "#f3f5f7" : "#ffb040" }}>{m.team ?? "UNMATCHED"}</td>
-                      <td style={td}>{pct(m.prob)}</td>
-                      <td style={{ ...td, color: "#565d68" }}>{m.eventTicker ?? ""}</td>
-                    </tr>
-                  ))}
+                  {koMarkets.map((m: any, i: number) => {
+                    // Suspicious: a nonzero prob coming ONLY from a stale last trade
+                    // (no live bid/ask) and/or a non-active market status.
+                    const noQuote = (m.bid == null || Number(m.bid) === 0) && (m.ask == null || Number(m.ask) === 0);
+                    const stale = (m.prob ?? 0) > 0 && noQuote;
+                    const notActive = m.status && m.status !== "active";
+                    return (
+                      <tr key={i} style={{ background: m.team == null ? "rgba(255,176,64,.12)" : stale || notActive ? "rgba(255,82,71,.14)" : undefined }}>
+                        <td style={td}>{m.stage}</td>
+                        <td style={td}>{m.subtitle}</td>
+                        <td style={{ ...td, color: m.team ? "#f3f5f7" : "#ffb040" }}>{m.team ?? "UNMATCHED"}</td>
+                        <td style={{ ...td, fontWeight: 700 }}>{pct(m.prob)}</td>
+                        <td style={{ ...td, color: notActive ? "#ff5247" : "#8b929c" }}>{m.status ?? "?"}</td>
+                        <td style={td}>{m.bid ?? "—"}</td>
+                        <td style={td}>{m.ask ?? "—"}</td>
+                        <td style={{ ...td, color: stale ? "#ff5247" : "#565d68" }}>{m.last ?? "—"}</td>
+                        <td style={{ ...td, color: "#565d68" }}>{m.eventTicker ?? ""}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
-            <div style={{ marginTop: 6, color: "#565d68" }}>Amber = subtitle that matched no pool team.</div>
+            <div style={{ marginTop: 6, color: "#565d68" }}>
+              Amber = subtitle matched no pool team. Red = nonzero prob with no live bid/ask (stale last trade) or a non-active market — these are the likely culprits for dead teams keeping odds.
+            </div>
           </div>
 
           {/* raw group markets */}

@@ -10,6 +10,7 @@
 // Pure assertions, no test framework — exits non-zero on any failure.
 
 import { runProjection } from "../src/lib/engine";
+import { marketProb } from "../src/lib/kalshi";
 import { ALL_TEAMS } from "../src/data/pool";
 import type { GroupFixture, KnockoutOdds, Stage } from "../src/lib/types";
 
@@ -130,6 +131,18 @@ function synthKnockout(): KnockoutOdds[] {
   const j = r.players.flatMap((p) => p.teams).find((t) => t.team === "Jordan")!;
   check("E: low-qualify team expected is small", j.expectedFinalPoints < 0.5, `exp=${j.expectedFinalPoints}`);
   check("E: expected positive (reach not zeroed)", j.expectedFinalPoints > 0, `exp=${j.expectedFinalPoints}`);
+}
+
+// ── F: marketProb rejects empty/illiquid books (the 50/50 phantom) ──────────
+{
+  console.log("\n=== F: marketProb empty-book handling ===");
+  const mp = (bid: string | null, ask: string | null, last: string | null = null) =>
+    marketProb({ ticker: "t", yes_bid_dollars: bid, yes_ask_dollars: ask, last_price_dollars: last } as any);
+  check("F: empty book bid0/ask1 → null (NOT 0.5)", mp("0", "1") === null, `got ${mp("0", "1")}`);
+  check("F: both quotes missing → null", mp(null, null) === null, `got ${mp(null, null)}`);
+  check("F: real tossup 0.48/0.52 → ~0.5", Math.abs((mp("0.48", "0.52") ?? -1) - 0.5) < 0.001);
+  check("F: favorite 0.90/0.95 → ~0.925", Math.abs((mp("0.90", "0.95") ?? -1) - 0.925) < 0.001);
+  check("F: longshot 0.02/0.06 → ~0.04", Math.abs((mp("0.02", "0.06") ?? -1) - 0.04) < 0.001);
 }
 
 console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILED"}`);
