@@ -179,6 +179,9 @@ export function runProjection(input: EngineInput): ProjectionResult {
       expectedFinalPoints: round2(
         currentPoints + grpWins * POINTS.win + grpDrawPoints + t.expFutureKnockoutWins * POINTS.win
       ),
+      // Provisional liveness from the projection alone; the orchestrator refines
+      // this with the live schedule (ground truth) before it reaches the UI.
+      alive: expRemainingWins >= 0.05 || t.koWins > 0,
     };
   });
 

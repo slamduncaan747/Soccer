@@ -118,7 +118,7 @@ export default function DebugPage() {
               <table style={{ borderCollapse: "collapse", width: "100%" }}>
                 <thead>
                   <tr>
-                    {["team", "owner", "W-D-L-KO", "cur", "grpPts", "koPts", "exp", "inKO?", "r32", "r16", "qf", "sf", "final", "champ", "remaining games"].map((h) => (
+                    {["team", "owner", "W-D-L-KO", "alive", "cur", "grpPts", "koPts", "exp", "inKO?", "r32", "r16", "qf", "sf", "final", "champ", "remaining games"].map((h) => (
                       <th key={h} style={th}>{h}</th>
                     ))}
                   </tr>
@@ -136,6 +136,7 @@ export default function DebugPage() {
                         <td style={td}><b>{t.team}</b></td>
                         <td style={{ ...td, color: "#8b929c" }}>{t.owner}</td>
                         <td style={td}>{rec ? `${rec.w}-${rec.d}-${rec.l}-${rec.koWins ?? 0}` : "—"}</td>
+                        <td style={{ ...td, color: t.alive ? "#19cf7a" : "#565d68" }}>{t.alive ? "yes" : "no"}</td>
                         <td style={td}>{num(t.currentPoints)}</td>
                         <td style={td}>{num(t.expGroupPoints)}</td>
                         <td style={{ ...td, color: (t.expKnockoutPoints ?? 0) > 0.1 ? "#ffb040" : "#565d68", fontWeight: 700 }}>{num(t.expKnockoutPoints)}</td>

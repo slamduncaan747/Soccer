@@ -48,6 +48,10 @@ export interface TeamProjection {
   currentPoints: number;
   expectedRemainingWins: number;
   expectedFinalPoints: number;
+  // Whether the team is still in the tournament (can still earn points). Set from
+  // the football-data schedule (any upcoming match) ORed with knockout presence —
+  // ground truth, independent of market liquidity. Drives the UI shading.
+  alive: boolean;
 }
 
 export interface PlayerProjection {

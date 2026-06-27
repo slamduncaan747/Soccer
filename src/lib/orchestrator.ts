@@ -126,6 +126,32 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
     knockoutTeams: knockoutOdds.length,
   };
 
+  // ── 4b) Refine team liveness from ground truth (drives UI shading) ────────
+  // A team is "alive" (not shaded) if it still has any upcoming match in the live
+  // schedule — group OR knockout — or it's in the knockout bracket (reach > 0) or
+  // has banked knockout wins. This is independent of market liquidity, so an
+  // illiquid forward market can no longer wrongly grey out a team that is, in
+  // fact, still playing.
+  const upcoming = new Set<string>();
+  for (const m of fdSchedule) {
+    if (!["FINISHED", "CANCELLED", "POSTPONED"].includes(m.status)) {
+      upcoming.add(m.home);
+      upcoming.add(m.away);
+    }
+  }
+  const hasReach = new Map(
+    knockoutOdds.map((k) => [k.team, Object.values(k.reach).some((v) => (v ?? 0) > 0)])
+  );
+  const koWinsByTeam = new Map(records.map((r) => [r.name, r.koWins ?? 0]));
+  for (const p of result.players) {
+    for (const t of p.teams) {
+      t.alive =
+        upcoming.has(t.team) ||
+        (hasReach.get(t.team) ?? false) ||
+        (koWinsByTeam.get(t.team) ?? 0) > 0;
+    }
+  }
+
   // ── 5) Append finished + odds-less unfinished matches for display ─
   // The engine only emits fixtures it could price, so result.fixtures has no
   // finished games and no live/upcoming games whose market we couldn't match.
@@ -289,6 +315,7 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
         record: rec ? { w: rec.w, d: rec.d, l: rec.l, koWins: rec.koWins ?? 0 } : null,
         reach: reachByTeam.get(t.name) ?? null,
         inKnockoutMarket: reachByTeam.has(t.name),
+        alive: proj?.alive ?? null,
         currentPoints: proj?.currentPoints ?? null,
         expGroupPoints,
         expKnockoutPoints,

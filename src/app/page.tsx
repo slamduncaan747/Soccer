@@ -74,7 +74,6 @@ function Flag({ team, height = 22 }: { team: string; height?: number }) {
 /* ── misc helpers ── */
 const round1 = (n: number) => Math.round(n * 10) / 10;
 const mcSE = (p: number, n: number) => (n > 0 ? Math.sqrt((p * (1 - p)) / n) : 0);
-const isAlive = (erw: number) => erw >= 0.05;
 
 function isLiveByTime(kickoff: string | undefined): boolean {
   if (!kickoff) return false;
@@ -604,7 +603,7 @@ function StandingsTab({ players }: { players: PlayerProjection[] }) {
                     <span /><span /><span className="s-th-wdl">W — D — L</span><span />
                   </div>
                   {p.teams.map((t) => {
-                    const alive = isAlive(t.expectedRemainingWins);
+                    const alive = t.alive;
                     return (
                       <div key={t.team} className={`s-team-row${alive ? "" : " s-team-elim"}`}>
                         <Flag team={t.team} height={18} />
@@ -1001,7 +1000,7 @@ function OddsTab({ players, iterations, oddsHistory }: {
                   </div>
                   <div className="v3-oexp-teams">
                     {p.teams.map((t) => {
-                      const alive = isAlive(t.expectedRemainingWins);
+                      const alive = t.alive;
                       return (
                         <div key={t.team} className={`v3-oexp-team${alive ? "" : " dim"}`}>
                           <Flag team={t.team} height={16} />
