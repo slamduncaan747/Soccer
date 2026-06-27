@@ -332,6 +332,9 @@ function ErrorScreen({ error, onRetry, retrying }: { error: LoadError; onRetry: 
           <button className="err-adv" onClick={() => setShowLogs((s) => !s)}>
             {showLogs ? "Hide details" : "Advanced"}
           </button>
+          <a className="err-adv" href="/debug" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
+            Full diagnostics →
+          </a>
         </div>
         {showLogs && (
           <pre className="err-logs">
@@ -1109,6 +1112,12 @@ function InsightsTab({ players, fixtures, playerFactors }: {
             )}
           </>
         )}
+      </div>
+
+      <div style={{ textAlign: "center", marginTop: 14 }}>
+        <a href="/debug" style={{ color: "var(--dim)", fontSize: 11, fontWeight: 700, textDecoration: "none", letterSpacing: ".3px" }}>
+          Pipeline diagnostics →
+        </a>
       </div>
 
     </div>

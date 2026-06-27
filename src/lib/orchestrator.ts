@@ -11,6 +11,10 @@ export interface ProjectOptions {
   // result.debug.teamBreakdown — used to diagnose anomalous projections in
   // production (where the live FD/Kalshi inputs aren't otherwise visible).
   debugTeam?: string;
+  // When true, attaches result.debug.dump with the entire pipeline state:
+  // feed health, raw Kalshi markets (with team matching), per-team reach
+  // ladders & projections, and remaining fixtures. Powers the /debug screen.
+  fullDebug?: boolean;
 }
 
 // Thrown when any live feed required to produce real numbers is unavailable.
@@ -46,10 +50,11 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
   const iterations = opts.iterations ?? 50000;
 
   // ── 1) Fetch every live feed. No fallbacks: if any is unavailable we stop. ──
+  const capture = !!opts.fullDebug;
   const [fd, grp, ko] = await Promise.all([
     fetchAllWCMatches(),
-    fetchGroupFixtures(),
-    fetchKnockoutOdds(),
+    fetchGroupFixtures(capture),
+    fetchKnockoutOdds(capture),
   ]);
 
   const diagnostics: string[] = [
@@ -244,6 +249,63 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
       reach: koEntry?.reach ?? null,
       remainingGroupGames: remaining,
       projection: proj,
+    };
+  }
+
+  // Full pipeline dump for the /debug screen — everything needed to trace any
+  // number back to its inputs.
+  if (opts.fullDebug) {
+    const reachByTeam = new Map(knockoutOdds.map((k) => [k.team, k.reach]));
+    const projByTeam = new Map(result.players.flatMap((p) => p.teams).map((t) => [t.team, t]));
+    const remByTeam = new Map<string, { home: string; away: string; oddsHome: ThreeWay | null }[]>();
+    for (const f of groupFixtures) {
+      for (const side of [f.home, f.away]) {
+        const arr = remByTeam.get(side) ?? [];
+        arr.push({ home: f.home, away: f.away, oddsHome: f.oddsHome ?? null });
+        remByTeam.set(side, arr);
+      }
+    }
+
+    const perTeam = ALL_TEAMS.map((t) => {
+      const rec = records.find((r) => r.name === t.name);
+      const proj = projByTeam.get(t.name);
+      return {
+        team: t.name,
+        owner: TEAM_OWNER[t.name] ?? "?",
+        record: rec ? { w: rec.w, d: rec.d, l: rec.l, koWins: rec.koWins ?? 0 } : null,
+        reach: reachByTeam.get(t.name) ?? null,
+        currentPoints: proj?.currentPoints ?? null,
+        expectedFinalPoints: proj?.expectedFinalPoints ?? null,
+        expectedRemainingWins: proj?.expectedRemainingWins ?? null,
+        remainingGroupGames: remByTeam.get(t.name) ?? [],
+      };
+    }).sort((a, b) => (b.expectedFinalPoints ?? 0) - (a.expectedFinalPoints ?? 0));
+
+    result.debug.dump = {
+      buildMarker: "live-only-v1",
+      generatedAt: result.generatedAt,
+      iterations: result.iterations,
+      sources: {
+        footballData: { ok: fd.ok, detail: fd.detail },
+        kalshiGroup: { ok: grp.ok, detail: grp.detail },
+        kalshiKnockout: { ok: ko.ok, detail: ko.detail },
+      },
+      diagnostics,
+      counts: {
+        scheduleMatches: fdSchedule.length,
+        teamsWithResults: fdData.records.length,
+        liveMatches: fdData.liveScores.length,
+        knockoutTeamsWithReach: knockoutOdds.filter((k) => Object.keys(k.reach).length > 0).length,
+        remainingGroupGames: groupFixtures.length,
+        remainingGroupGamesPriced: fixturesWithOdds,
+        matchday,
+      },
+      perTeam,
+      remainingGroupFixtures: groupFixtures.map((f) => ({
+        home: f.home, away: f.away, kickoff: f.kickoff, oddsHome: f.oddsHome ?? null,
+      })),
+      rawKnockoutMarkets: ko.markets ?? [],
+      rawGroupMarkets: grp.markets ?? [],
     };
   }
 

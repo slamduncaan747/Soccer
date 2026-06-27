@@ -10,9 +10,10 @@ export async function GET(req: Request) {
     Math.max(1000, Number(url.searchParams.get("iterations")) || 50000)
   );
   const debugTeam = url.searchParams.get("debugTeam") || undefined;
+  const fullDebug = url.searchParams.get("debug") === "1";
 
   try {
-    const result = await buildProjection({ iterations, debugTeam });
+    const result = await buildProjection({ iterations, debugTeam, fullDebug });
     return NextResponse.json(result);
   } catch (e) {
     // A required live feed was unavailable — surface the reason + per-feed

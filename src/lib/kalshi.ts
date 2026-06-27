@@ -1,4 +1,4 @@
-import { GroupFixture, KnockoutOdds, Stage } from "./types";
+import { GroupFixture, KnockoutOdds, Stage, ThreeWay } from "./types";
 import { normalize3 } from "./probability";
 import { ALL_TEAMS } from "../data/pool";
 
@@ -173,9 +173,23 @@ function monotone(reach: Partial<Record<Stage, number>>): Partial<Record<Stage, 
 //   sf       ← KXWCROUND-*SEMI
 //   final    ← KXWCROUND-*FINAL (reach the final)
 //   champion ← KXMENWORLDCUP    (win the final / win the cup)
-export async function fetchKnockoutOdds(): Promise<{ odds: KnockoutOdds[]; ok: boolean; detail: string }> {
+// One parsed knockout market, for the debug screen: shows the raw subtitle, the
+// team it matched to (or null = unmatched), the stage, and the read probability.
+export interface KnockoutMarketRow {
+  ticker?: string;
+  eventTicker?: string;
+  stage: Stage | "?";
+  subtitle: string;
+  team: string | null;
+  prob: number | null;
+}
+
+export async function fetchKnockoutOdds(
+  capture = false
+): Promise<{ odds: KnockoutOdds[]; ok: boolean; detail: string; markets?: KnockoutMarketRow[] }> {
   const aliases = teamAliases();
   const byTeam = new Map<string, Partial<Record<Stage, number>>>();
+  const rows: KnockoutMarketRow[] = [];
   const set = (team: string, stage: Stage, p: number) => {
     const r = byTeam.get(team) ?? {};
     r[stage] = p;
@@ -192,8 +206,10 @@ export async function fetchKnockoutOdds(): Promise<{ odds: KnockoutOdds[]; ok: b
   const champ = champRes.markets;
 
   for (const m of qual) {
-    const team = matchTeam(m.yes_sub_title || m.subtitle, aliases);
+    const sub = m.yes_sub_title || m.subtitle || "";
+    const team = matchTeam(sub, aliases);
     const p = marketProb(m);
+    if (capture) rows.push({ ticker: m.ticker, eventTicker: m.event_ticker, stage: "r32", subtitle: sub, team, prob: p });
     if (team && p != null) set(team, "r32", p);
   }
 
@@ -208,16 +224,20 @@ export async function fetchKnockoutOdds(): Promise<{ odds: KnockoutOdds[]; ok: b
   for (const m of round) {
     const ev = m.event_ticker || "";
     const stage = roundStage.find(([re]) => re.test(ev))?.[1];
-    if (!stage) continue;
-    const team = matchTeam(m.yes_sub_title || m.subtitle, aliases);
+    const sub = m.yes_sub_title || m.subtitle || "";
+    const team = matchTeam(sub, aliases);
     const p = marketProb(m);
+    if (capture) rows.push({ ticker: m.ticker, eventTicker: ev, stage: stage ?? "?", subtitle: sub, team, prob: p });
+    if (!stage) continue;
     if (team && p != null) set(team, stage, p);
   }
 
   // Champion market = win the final → the terminal `champion` reach level.
   for (const m of champ) {
-    const team = matchTeam(m.yes_sub_title || m.subtitle, aliases);
+    const sub = m.yes_sub_title || m.subtitle || "";
+    const team = matchTeam(sub, aliases);
     const p = marketProb(m);
+    if (capture) rows.push({ ticker: m.ticker, eventTicker: m.event_ticker, stage: "champion", subtitle: sub, team, prob: p });
     if (team && p != null) set(team, "champion", p);
   }
 
@@ -234,7 +254,7 @@ export async function fetchKnockoutOdds(): Promise<{ odds: KnockoutOdds[]; ok: b
   const ok = fetchOk && hasReach;
   const detail = `${qualRes.detail} | ${roundRes.detail} | ${champRes.detail} → ${odds.length} teams with reach`;
   console.log(`[kalshi] knockout: ${odds.length} teams with reach markets (ok=${ok})`);
-  return { odds, ok, detail };
+  return { odds, ok, detail, markets: capture ? rows : undefined };
 }
 
 // Per-match 3-way group odds from the KXWCGAME series. Each game is one event
@@ -242,10 +262,22 @@ export async function fetchKnockoutOdds(): Promise<{ odds: KnockoutOdds[]; ok: b
 // We read each leg's YES probability and de-vig the trio into a coherent
 // {win, draw, loss} distribution. Home/away orientation is internal — the
 // orchestrator matches fixtures to the FD schedule in either orientation.
-export async function fetchGroupFixtures(): Promise<{ fixtures: GroupFixture[]; ok: boolean; detail: string }> {
+// One parsed group event, for the debug screen.
+export interface GroupMarketRow {
+  eventTicker: string;
+  legs: { subtitle: string; team: string | null; prob: number | null }[];
+  home: string | null;
+  away: string | null;
+  oddsHome?: ThreeWay;
+}
+
+export async function fetchGroupFixtures(
+  capture = false
+): Promise<{ fixtures: GroupFixture[]; ok: boolean; detail: string; markets?: GroupMarketRow[] }> {
   const aliases = teamAliases();
   const res = await fetchSeriesMarkets(SERIES.game);
   const markets = res.markets;
+  const rows: GroupMarketRow[] = [];
 
   const byEvent = new Map<string, KalshiMarket[]>();
   for (const m of markets) {
@@ -260,16 +292,28 @@ export async function fetchGroupFixtures(): Promise<{ fixtures: GroupFixture[]; 
   for (const [ek, legs] of byEvent) {
     let tie: number | null = null;
     const teams: { name: string; p: number }[] = [];
+    const legRows: GroupMarketRow["legs"] = [];
     for (const m of legs) {
       const sub = (m.yes_sub_title || m.subtitle || "").trim();
       const p = marketProb(m);
+      const isTie = /^tie$|draw/i.test(sub);
+      const team = isTie ? null : matchTeam(sub, aliases);
+      if (capture) legRows.push({ subtitle: isTie ? `${sub} (tie)` : sub, team, prob: p });
       if (p == null) continue;
-      if (/^tie$|draw/i.test(sub)) {
-        tie = p;
-        continue;
-      }
-      const team = matchTeam(sub, aliases);
+      if (isTie) { tie = p; continue; }
       if (team) teams.push({ name: team, p });
+    }
+    const oddsHome = teams.length === 2 && tie != null
+      ? normalize3({ win: teams[0].p, draw: tie, loss: teams[1].p })
+      : undefined;
+    if (capture) {
+      rows.push({
+        eventTicker: ek,
+        legs: legRows,
+        home: teams[0]?.name ?? null,
+        away: teams[1]?.name ?? null,
+        oddsHome,
+      });
     }
     if (teams.length !== 2 || tie == null) continue;
     const [home, away] = teams;
@@ -277,7 +321,7 @@ export async function fetchGroupFixtures(): Promise<{ fixtures: GroupFixture[]; 
       id: ek,
       home: home.name,
       away: away.name,
-      oddsHome: normalize3({ win: home.p, draw: tie, loss: away.p }),
+      oddsHome: oddsHome!,
     });
   }
 
@@ -287,5 +331,5 @@ export async function fetchGroupFixtures(): Promise<{ fixtures: GroupFixture[]; 
   // the live schedule.
   const ok = res.ok;
   console.log(`[kalshi] group: ${fixtures.length} fixtures with 3-way odds (fetch ok=${ok})`);
-  return { fixtures, ok, detail: `${res.detail} → ${fixtures.length} parsed fixtures` };
+  return { fixtures, ok, detail: `${res.detail} → ${fixtures.length} parsed fixtures`, markets: capture ? rows : undefined };
 }
