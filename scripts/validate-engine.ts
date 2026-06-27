@@ -133,16 +133,29 @@ function synthKnockout(): KnockoutOdds[] {
   check("E: expected positive (reach not zeroed)", j.expectedFinalPoints > 0, `exp=${j.expectedFinalPoints}`);
 }
 
-// ── F: marketProb rejects empty/illiquid books (the 50/50 phantom) ──────────
+// ── F: marketProb — settled markets via result, active via book ─────────────
+//     Shapes taken directly from the live Kalshi dump.
 {
-  console.log("\n=== F: marketProb empty-book handling ===");
-  const mp = (bid: string | null, ask: string | null, last: string | null = null) =>
-    marketProb({ ticker: "t", yes_bid_dollars: bid, yes_ask_dollars: ask, last_price_dollars: last } as any);
-  check("F: empty book bid0/ask1 → null (NOT 0.5)", mp("0", "1") === null, `got ${mp("0", "1")}`);
-  check("F: both quotes missing → null", mp(null, null) === null, `got ${mp(null, null)}`);
-  check("F: real tossup 0.48/0.52 → ~0.5", Math.abs((mp("0.48", "0.52") ?? -1) - 0.5) < 0.001);
-  check("F: favorite 0.90/0.95 → ~0.925", Math.abs((mp("0.90", "0.95") ?? -1) - 0.925) < 0.001);
-  check("F: longshot 0.02/0.06 → ~0.04", Math.abs((mp("0.02", "0.06") ?? -1) - 0.04) < 0.001);
+  console.log("\n=== F: marketProb (settled result vs active book) ===");
+  const mk = (o: any) => marketProb({ ticker: "t", ...o } as any);
+
+  // Settled qualify markets: book is the 0/1 placeholder, outcome is in `result`.
+  check("F: finalized YES → 1 (e.g. Argentina qualified)",
+    mk({ status: "finalized", result: "yes", yes_bid_dollars: "0", yes_ask_dollars: "1", last_price_dollars: "0.99" }) === 1);
+  check("F: finalized NO → 0 (e.g. Panama eliminated)",
+    mk({ status: "finalized", result: "no", yes_bid_dollars: "0", yes_ask_dollars: "1", last_price_dollars: "0.01" }) === 0);
+
+  // Active markets: real two-sided book → midpoint.
+  check("F: active favorite 0.81/0.82 → ~0.815 (Croatia qualify)",
+    Math.abs((mk({ status: "active", yes_bid_dollars: "0.81", yes_ask_dollars: "0.82" }) ?? -1) - 0.815) < 0.001);
+  check("F: active longshot 0.00/0.01 → ~0.005 (not zeroed, not 0.5)",
+    Math.abs((mk({ status: "active", yes_bid_dollars: "0.00", yes_ask_dollars: "0.01" }) ?? -1) - 0.005) < 0.0001);
+  check("F: active basically-in 0.99/1.00 → ~0.995 (Ghana qualify)",
+    Math.abs((mk({ status: "active", yes_bid_dollars: "0.99", yes_ask_dollars: "1.00" }) ?? -1) - 0.995) < 0.001);
+
+  // Genuinely empty active book (no result, full 0–1 range) → null, NOT 0.5.
+  check("F: empty active book 0/1 → null (NOT 0.5)",
+    mk({ status: "active", yes_bid_dollars: "0", yes_ask_dollars: "1" }) === null);
 }
 
 console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILED"}`);

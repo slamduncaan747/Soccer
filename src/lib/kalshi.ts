@@ -30,7 +30,8 @@ interface KalshiMarket {
   yes_bid_dollars?: string | null;
   yes_ask_dollars?: string | null;
   last_price_dollars?: string | null;
-  status?: string;
+  status?: string;          // "active" while trading, "finalized" once settled
+  result?: string | null;   // "yes" / "no" on settled markets (the definitive outcome)
 }
 
 function num(s: string | null | undefined): number | null {
@@ -43,25 +44,29 @@ function clamp01(x: number): number {
   return Math.max(0, Math.min(1, x));
 }
 
-// A market's YES probability: prefer the bid/ask midpoint (most current),
-// fall back to last trade, then the ask alone. Returns null if truly unpriced.
+// A market's YES probability.
 //
-// CRITICAL: an illiquid / empty order book quotes the FULL range — bid≈0 and
-// ask≈1 (or both absent) — whose midpoint is a meaningless 0.5. That is exactly
-// what made every eliminated team show ~50% to reach each knockout round (and
-// therefore phantom expected points). We reject that quote: with no genuine
-// two-sided market there is no probability, so the team's reach is left unset
-// (→ 0 in the engine) rather than defaulting to a coin flip.
+// 1) SETTLED markets carry the definitive outcome in `result` (yes→1, no→0).
+//    Their order book is the placeholder bid 0 / ask 1, so we must NOT read a
+//    price off them — that placeholder's midpoint (0.5) was the source of every
+//    eliminated team showing ~50% to advance, and reading it as "empty" was what
+//    blanked out qualified teams' R32. `result` is authoritative.
+// 2) ACTIVE markets have a genuine two-sided book → use the bid/ask midpoint.
+//    A truly empty active book (bid≈0 AND ask≈1) has no real price → null.
 export function marketProb(m: KalshiMarket): number | null {
+  // Settled outcome — independent of the (placeholder) book.
+  if (m.result === "yes") return 1;
+  if (m.result === "no") return 0;
+
   const bid = num(m.yes_bid_dollars);
   const ask = num(m.yes_ask_dollars);
   const last = num(m.last_price_dollars);
 
-  // Empty / one-sided book: no real bid AND no real ask (the 0–1 placeholder).
-  const emptyBook = (bid == null || bid <= 0.05) && (ask == null || ask >= 0.95);
-  if (emptyBook) return null;
-
-  if (bid != null && ask != null && ask >= bid && bid + ask > 0) {
+  if (bid != null && ask != null && ask >= bid) {
+    // Genuinely empty active book (full 0–1 range) — no real probability.
+    if (bid <= 0.01 && ask >= 0.99) {
+      return last != null && last > 0 && last < 1 ? clamp01(last) : null;
+    }
     return clamp01((bid + ask) / 2);
   }
   if (last != null && last > 0 && last < 1) return clamp01(last);
@@ -70,11 +75,15 @@ export function marketProb(m: KalshiMarket): number | null {
 }
 
 function teamAliases(): Map<string, string> {
-  // map lowercased provider label -> canonical team name
+  // map lowercased provider label -> canonical team name. We include fdName too
+  // because Kalshi is inconsistent across series (e.g. the champion market says
+  // "Turkey" while the round market says "Turkiye"; "Bosnia and Herzegovina" vs
+  // "Bosnia"), so every known spelling should resolve.
   const m = new Map<string, string>();
   for (const t of ALL_TEAMS) {
     m.set(t.name.toLowerCase(), t.name);
     if (t.kalshiName) m.set(t.kalshiName.toLowerCase(), t.name);
+    if (t.fdName) m.set(t.fdName.toLowerCase(), t.name);
   }
   return m;
 }
@@ -194,9 +203,10 @@ export interface KnockoutMarketRow {
   subtitle: string;
   team: string | null;
   prob: number | null;
-  // Raw fields so we can see WHY prob is what it is — e.g. a closed/settled
-  // market with no live quote whose `prob` came only from a stale last trade.
+  // Raw fields so we can see WHY prob is what it is — settled markets resolve via
+  // `result`; active ones via the bid/ask book.
   status?: string;
+  result?: string | null;
   bid?: string | null;
   ask?: string | null;
   last?: string | null;
@@ -206,7 +216,7 @@ function koRow(m: KalshiMarket, stage: Stage | "?", team: string | null, prob: n
   return {
     ticker: m.ticker, eventTicker: m.event_ticker, stage,
     subtitle: m.yes_sub_title || m.subtitle || "", team, prob,
-    status: m.status, bid: m.yes_bid_dollars, ask: m.yes_ask_dollars, last: m.last_price_dollars,
+    status: m.status, result: m.result, bid: m.yes_bid_dollars, ask: m.yes_ask_dollars, last: m.last_price_dollars,
   };
 }
 

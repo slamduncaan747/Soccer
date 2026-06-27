@@ -6,4 +6,5 @@ wc-pool/
 wc-pool.zip
 tsconfig.tsbuildinfo
 .validate-out/
+kalshi-dump.json
 .claude/

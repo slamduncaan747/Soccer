@@ -169,25 +169,22 @@ export default function DebugPage() {
             <div style={{ overflowX: "auto", maxHeight: 360, overflowY: "auto" }}>
               <table style={{ borderCollapse: "collapse", width: "100%" }}>
                 <thead>
-                  <tr>{["stage", "subtitle", "→ matched team", "prob", "status", "bid", "ask", "last", "eventTicker"].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+                  <tr>{["stage", "subtitle", "→ matched team", "prob", "status", "result", "bid", "ask", "last", "eventTicker"].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
                 </thead>
                 <tbody>
                   {koMarkets.map((m: any, i: number) => {
-                    // Suspicious: a nonzero prob coming ONLY from a stale last trade
-                    // (no live bid/ask) and/or a non-active market status.
-                    const noQuote = (m.bid == null || Number(m.bid) === 0) && (m.ask == null || Number(m.ask) === 0);
-                    const stale = (m.prob ?? 0) > 0 && noQuote;
-                    const notActive = m.status && m.status !== "active";
+                    const settled = m.status === "finalized" || m.result === "yes" || m.result === "no";
                     return (
-                      <tr key={i} style={{ background: m.team == null ? "rgba(255,176,64,.12)" : stale || notActive ? "rgba(255,82,71,.14)" : undefined }}>
+                      <tr key={i} style={{ background: m.team == null ? "rgba(255,176,64,.12)" : undefined }}>
                         <td style={td}>{m.stage}</td>
                         <td style={td}>{m.subtitle}</td>
                         <td style={{ ...td, color: m.team ? "#f3f5f7" : "#ffb040" }}>{m.team ?? "UNMATCHED"}</td>
                         <td style={{ ...td, fontWeight: 700 }}>{pct(m.prob)}</td>
-                        <td style={{ ...td, color: notActive ? "#ff5247" : "#8b929c" }}>{m.status ?? "?"}</td>
+                        <td style={{ ...td, color: settled ? "#8b929c" : "#19cf7a" }}>{m.status ?? "?"}</td>
+                        <td style={{ ...td, color: m.result === "yes" ? "#19cf7a" : m.result === "no" ? "#ff5247" : "#565d68" }}>{m.result || "—"}</td>
                         <td style={td}>{m.bid ?? "—"}</td>
                         <td style={td}>{m.ask ?? "—"}</td>
-                        <td style={{ ...td, color: stale ? "#ff5247" : "#565d68" }}>{m.last ?? "—"}</td>
+                        <td style={{ ...td, color: "#565d68" }}>{m.last ?? "—"}</td>
                         <td style={{ ...td, color: "#565d68" }}>{m.eventTicker ?? ""}</td>
                       </tr>
                     );
@@ -196,7 +193,7 @@ export default function DebugPage() {
               </table>
             </div>
             <div style={{ marginTop: 6, color: "#565d68" }}>
-              Amber = subtitle matched no pool team. Red = nonzero prob with no live bid/ask (stale last trade) or a non-active market — these are the likely culprits for dead teams keeping odds.
+              Amber = subtitle matched no pool team. Settled markets resolve via <b>result</b> (yes→100%, no→0%); active markets via the bid/ask book.
             </div>
           </div>
 
