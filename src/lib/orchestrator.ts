@@ -2,7 +2,7 @@ import { ALL_TEAMS, TEAM_OWNER } from "../data/pool";
 import { fetchAllWCMatches, mergeRecords, ScheduledMatch, KO_STAGES } from "./footballData";
 import { fetchGroupFixtures, fetchKnockoutOdds } from "./kalshi";
 import { runProjection } from "./engine";
-import { GroupFixture, ProjectionResult, FixtureProjection, ThreeWay } from "./types";
+import { GroupFixture, KnockoutOdds, ProjectionResult, FixtureProjection, KNOCKOUT_STAGES, ThreeWay } from "./types";
 import { snapshotOdds, readOddsHistory } from "./supabase";
 
 export interface ProjectOptions {
@@ -44,6 +44,45 @@ function rememberOdds(home: string, away: string, o: ThreeWay) {
 
 function recallOdds(home: string, away: string): ThreeWay | undefined {
   return FIXTURE_ODDS_CACHE.get(`${home}|${away}`);
+}
+
+// FD knockout stage → index into KNOCKOUT_STAGES of the match being played,
+// i.e. the match that decides reach[levels[i+1]] given reach[levels[i]].
+const KO_STAGE_INDEX: Record<string, number> = {
+  LAST_32: 0,         // r32 -> r16
+  LAST_16: 1,         // r16 -> qf
+  QUARTER_FINALS: 2,  // qf  -> sf
+  SEMI_FINALS: 3,     // sf  -> final
+  FINAL: 4,            // final -> champion
+};
+
+// Fallback per-match odds for a knockout fixture, derived from each team's
+// reach ladder (P(win this match) = reach[next] / reach[here]), normalized
+// head-to-head since one team must win (knockout ties are decided by ET/pens —
+// no draw outcome). Used only when no live Kalshi per-match market is matched.
+function deriveKnockoutOdds(
+  home: string,
+  away: string,
+  stage: string,
+  knockoutOdds: KnockoutOdds[]
+): ThreeWay | undefined {
+  const idx = KO_STAGE_INDEX[stage];
+  if (idx == null) return undefined;
+  const here = KNOCKOUT_STAGES[idx];
+  const next = KNOCKOUT_STAGES[idx + 1];
+  const condWin = (team: string): number | null => {
+    const r = knockoutOdds.find((k) => k.team === team)?.reach;
+    const h = r?.[here];
+    const n = r?.[next];
+    if (h == null || n == null || h <= 0) return null;
+    return Math.max(0, Math.min(1, n / h));
+  };
+  const wHome = condWin(home);
+  const wAway = condWin(away);
+  if (wHome == null || wAway == null) return undefined;
+  const sum = wHome + wAway;
+  if (sum <= 0) return undefined;
+  return { win: wHome / sum, draw: 0, loss: wAway / sum };
 }
 
 export async function buildProjection(opts: ProjectOptions = {}): Promise<ProjectionResult> {
@@ -193,16 +232,33 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
           !["FINISHED", "CANCELLED", "POSTPONED"].includes(m.status) &&
           !present.has(`${m.home}|${m.away}`)
       )
-      .map((m) => ({
-        id: `fd-${m.id}`,
-        home: m.home,
-        away: m.away,
-        homeOwner: TEAM_OWNER[m.home] ?? "?",
-        awayOwner: TEAM_OWNER[m.away] ?? "?",
-        kickoff: m.kickoff,
-        oddsHome: recallOdds(m.home, m.away),
-        swing: 0,
-      }));
+      .map((m) => {
+        // Prefer a real Kalshi per-match market (KXWCGAME also lists knockout
+        // fixtures, not just group games) over the reach-derived estimate.
+        const k = kalshiMap.get(`${m.home}|${m.away}`);
+        const kFlip = !k ? kalshiMap.get(`${m.away}|${m.home}`) : null;
+        let oddsHome = k?.oddsHome;
+        if (!oddsHome && kFlip?.oddsHome) {
+          oddsHome = { win: kFlip.oddsHome.loss, draw: kFlip.oddsHome.draw, loss: kFlip.oddsHome.win };
+        }
+        if (oddsHome) {
+          rememberOdds(m.home, m.away, oddsHome);
+        } else {
+          oddsHome =
+            recallOdds(m.home, m.away) ??
+            deriveKnockoutOdds(m.home, m.away, m.stage, knockoutOdds);
+        }
+        return {
+          id: `fd-${m.id}`,
+          home: m.home,
+          away: m.away,
+          homeOwner: TEAM_OWNER[m.home] ?? "?",
+          awayOwner: TEAM_OWNER[m.away] ?? "?",
+          kickoff: m.kickoff,
+          oddsHome,
+          swing: 0,
+        };
+      });
 
     result.fixtures = [...result.fixtures, ...finishedProjections, ...unpricedProjections];
   }
