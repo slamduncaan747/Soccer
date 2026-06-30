@@ -13,7 +13,7 @@ export interface LiveRecord {
 // FD stage labels for the five scoring knockout rounds. A win in any of these
 // advances the team a round and is worth 3 points. THIRD_PLACE is intentionally
 // excluded — it advances no one and has no reach market.
-const KO_STAGES = new Set([
+export const KO_STAGES = new Set([
   "LAST_32", "LAST_16", "QUARTER_FINALS", "SEMI_FINALS", "FINAL",
 ]);
 

@@ -1,5 +1,5 @@
 import { ALL_TEAMS, TEAM_OWNER } from "../data/pool";
-import { fetchAllWCMatches, mergeRecords, ScheduledMatch } from "./footballData";
+import { fetchAllWCMatches, mergeRecords, ScheduledMatch, KO_STAGES } from "./footballData";
 import { fetchGroupFixtures, fetchKnockoutOdds } from "./kalshi";
 import { runProjection } from "./engine";
 import { GroupFixture, ProjectionResult, FixtureProjection, ThreeWay } from "./types";
@@ -153,16 +153,19 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
   }
 
   // ── 5) Append finished + odds-less unfinished matches for display ─
-  // The engine only emits fixtures it could price, so result.fixtures has no
-  // finished games and no live/upcoming games whose market we couldn't match.
-  // We add both here so the Games tab always shows every group match — a live
-  // game must never vanish just because its market closed at kickoff.
+  // The engine only emits group fixtures it could price, so result.fixtures has
+  // no finished games, no knockout games at all, and no live/upcoming games
+  // whose market we couldn't match. We add all of those here so the Games tab
+  // always shows every match — group or knockout — and a live game never
+  // vanishes just because its market closed at kickoff. THIRD_PLACE is included
+  // for display even though it doesn't score (see footballData.ts KO_STAGES).
+  const DISPLAY_STAGES = new Set(["GROUP_STAGE", "THIRD_PLACE", ...KO_STAGES]);
   if (fdSchedule && fdSchedule.length > 0) {
     const present = new Set(result.fixtures.map((f) => `${f.home}|${f.away}`));
 
     const finished = fdSchedule.filter(
       (m): m is ScheduledMatch & { scoreHome: number; scoreAway: number } =>
-        m.stage === "GROUP_STAGE" &&
+        DISPLAY_STAGES.has(m.stage) &&
         m.status === "FINISHED" &&
         m.scoreHome !== undefined &&
         m.scoreAway !== undefined
@@ -180,12 +183,13 @@ export async function buildProjection(opts: ProjectOptions = {}): Promise<Projec
       liveScore: { home: m.scoreHome, away: m.scoreAway },
     }));
 
-    // Unfinished group games the engine dropped for lack of odds (e.g. a live
-    // game whose market just closed). Attach last-known odds if we have them.
+    // Unfinished games the engine dropped for lack of odds — all knockout games
+    // (the engine only prices group fixtures) plus any group game whose market
+    // closed/wasn't matched. Attach last-known odds if we have them.
     const unpricedProjections: FixtureProjection[] = fdSchedule
       .filter(
         (m) =>
-          m.stage === "GROUP_STAGE" &&
+          DISPLAY_STAGES.has(m.stage) &&
           !["FINISHED", "CANCELLED", "POSTPONED"].includes(m.status) &&
           !present.has(`${m.home}|${m.away}`)
       )
